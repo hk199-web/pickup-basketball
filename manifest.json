@@ -1,0 +1,19 @@
+{
+  "name": "Basketball Team Builder",
+  "short_name": "Team Builder",
+  "description": "Fair Basketball Teams in Sekunden",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f1012",
+  "theme_color": "#f77f00",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

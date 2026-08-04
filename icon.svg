@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="ball" cx="38%" cy="32%" r="65%">
+      <stop offset="0%" stop-color="#ffaa44"/>
+      <stop offset="65%" stop-color="#f77f00"/>
+      <stop offset="100%" stop-color="#b85500"/>
+    </radialGradient>
+    <clipPath id="clip">
+      <circle cx="256" cy="248" r="158"/>
+    </clipPath>
+  </defs>
+  <!-- Background -->
+  <rect width="512" height="512" rx="108" fill="#0f1012"/>
+  <!-- Ball -->
+  <circle cx="256" cy="248" r="158" fill="url(#ball)"/>
+  <!-- Seams clipped to ball -->
+  <g clip-path="url(#clip)" fill="none" stroke="#a05000" stroke-width="7" stroke-linecap="round">
+    <!-- Left vertical seam -->
+    <path d="M256 90 C196 128 180 188 180 248 C180 308 196 368 256 406"/>
+    <!-- Right vertical seam -->
+    <path d="M256 90 C316 128 332 188 332 248 C332 308 316 368 256 406"/>
+    <!-- Horizontal seam -->
+    <line x1="98" y1="248" x2="414" y2="248"/>
+    <!-- Upper lateral arc -->
+    <path d="M118 165 Q256 218 394 165"/>
+    <!-- Lower lateral arc -->
+    <path d="M118 331 Q256 278 394 331"/>
+  </g>
+</svg>
