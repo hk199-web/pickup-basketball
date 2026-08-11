@@ -1437,8 +1437,40 @@ function invitePlayer(id){
   await renderPlayers();
   refreshBuilder();
   StorageService.subscribeToPlayers(async()=>{await renderPlayers();refreshBuilder();});
-  if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  registerServiceWorker();
 })();
+
+/* ================================================================
+   SERVICE WORKER – mit aktiver Update-Erkennung
+   ================================================================ */
+function registerServiceWorker(){
+  if(!('serviceWorker' in navigator))return;
+
+  navigator.serviceWorker.register('/sw.js').then(reg=>{
+    // Bei jedem App-Start nach einer neueren Version suchen
+    reg.update().catch(()=>{});
+
+    // Neue Version gefunden → sobald bereit, sofort übernehmen
+    reg.addEventListener('updatefound',()=>{
+      const sw=reg.installing;
+      if(!sw)return;
+      sw.addEventListener('statechange',()=>{
+        if(sw.state==='installed'&&navigator.serviceWorker.controller){
+          sw.postMessage('SKIP_WAITING');
+          showToast('Neue Version verfügbar – wird geladen…','success');
+        }
+      });
+    });
+  }).catch(()=>{});
+
+  // Sobald der neue Service Worker übernimmt: einmal neu laden
+  let refreshing=false;
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{
+    if(refreshing)return;
+    refreshing=true;
+    window.location.reload();
+  });
+}
 </script>
 </body>
 </html>
