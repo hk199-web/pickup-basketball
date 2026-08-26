@@ -255,6 +255,37 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .toast.error{border-color:var(--red);color:#f87171}
 @keyframes fadeInUp{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 
+/* ---- SAISON-LEISTE ---- */
+.season-bar{display:flex;align-items:center;gap:8px;padding:8px 16px;background:rgba(19,22,27,.75);border-bottom:1px solid var(--border);position:sticky;top:47px;z-index:99;backdrop-filter:blur(10px)}
+.season-select{flex:1;padding:7px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:700;outline:none;cursor:pointer;min-width:0}
+.season-select:focus{border-color:var(--accent)}
+.season-kind{font-size:.62rem;font-weight:700;padding:3px 7px;border-radius:4px;border:1px solid;flex-shrink:0}
+.kind-indoor{color:#7db9fa;border-color:rgba(59,130,246,.35);background:rgba(59,130,246,.1)}
+.kind-outdoor{color:#fbbf24;border-color:rgba(251,191,36,.35);background:rgba(251,191,36,.1)}
+.admin-btn{width:32px;height:32px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text3);cursor:pointer;font-size:.8rem;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all var(--t)}
+.admin-btn.on{border-color:var(--accent);background:rgba(247,127,0,.12);color:var(--accent)}
+
+/* ---- ADMIN ---- */
+.admin-banner{display:flex;align-items:center;gap:7px;margin:10px 16px 0;padding:7px 12px;border-radius:var(--radius-sm);background:rgba(247,127,0,.08);border:1px solid rgba(247,127,0,.28);color:var(--accent);font-size:.72rem;font-weight:700}
+.pin-display{display:flex;justify-content:center;gap:10px;margin:18px 0 22px}
+.pin-dot{width:14px;height:14px;border-radius:50%;background:var(--bg3);border:2px solid var(--border);transition:all var(--t)}
+.pin-dot.filled{background:var(--accent);border-color:var(--accent)}
+.pin-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.pin-key{padding:16px 0;border-radius:11px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-family:'Bebas Neue',sans-serif;font-size:1.5rem;cursor:pointer;transition:background var(--t)}
+.pin-key:active{background:var(--border);transform:scale(.94)}
+.pin-key.wide{grid-column:span 1;font-size:1rem;font-family:'DM Sans',sans-serif;font-weight:700;color:var(--text2)}
+.pin-error{text-align:center;color:#f87171;font-size:.8rem;font-weight:600;min-height:20px;margin-top:10px}
+
+/* ---- SAISON-VERWALTUNG ---- */
+.season-row{display:flex;align-items:center;gap:9px;padding:11px 12px;background:var(--bg3);border-radius:9px;margin-bottom:6px}
+.season-row.active-season{border:1px solid var(--accent);background:rgba(247,127,0,.08)}
+.season-name{flex:1;font-size:.88rem;font-weight:700;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.season-meta{font-size:.7rem;color:var(--text3)}
+
+/* ---- MATCH LÖSCHEN ---- */
+.mh-delete{width:26px;height:26px;border-radius:6px;border:none;background:rgba(239,68,68,.12);color:#f87171;cursor:pointer;font-size:.7rem;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.mh-delete:active{background:rgba(239,68,68,.25)}
+
 .hidden{display:none!important}
 .stars{font-size:.72rem}
 .star-on{color:var(--star-on)} .star-off{color:var(--star-off)}
@@ -311,6 +342,15 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <button class="nav-tab" data-tab="results" onclick="showTab('results')">🏆 Ergebnis</button>
     <button class="nav-tab" data-tab="stats" onclick="showTab('stats')">📊 Stats</button>
   </nav>
+
+  <!-- SAISON-LEISTE -->
+  <div class="season-bar">
+    <select class="season-select" id="season-select" onchange="switchSeason(this.value)">
+      <option>Lade…</option>
+    </select>
+    <span class="season-kind hidden" id="season-kind"></span>
+    <button class="admin-btn" id="admin-btn" onclick="toggleAdmin()" title="Admin">🔒</button>
+  </div>
 
   <!-- SPIELER -->
   <section id="tab-players">
@@ -477,10 +517,62 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   </div>
 </div>
 
+<!-- PIN-EINGABE -->
+<div class="overlay" id="pin-overlay" onclick="if(event.target===this)closePin()">
+  <div class="sheet">
+    <div class="sheet-title">🔒 Admin-Zugang</div>
+    <p style="font-size:.85rem;color:var(--text2);margin-bottom:4px">PIN eingeben um Admin-Rechte freizuschalten.</p>
+    <div class="pin-display">
+      <div class="pin-dot" id="pd-0"></div>
+      <div class="pin-dot" id="pd-1"></div>
+      <div class="pin-dot" id="pd-2"></div>
+      <div class="pin-dot" id="pd-3"></div>
+    </div>
+    <div class="pin-pad">
+      <button class="pin-key" onclick="pinPress('1')">1</button>
+      <button class="pin-key" onclick="pinPress('2')">2</button>
+      <button class="pin-key" onclick="pinPress('3')">3</button>
+      <button class="pin-key" onclick="pinPress('4')">4</button>
+      <button class="pin-key" onclick="pinPress('5')">5</button>
+      <button class="pin-key" onclick="pinPress('6')">6</button>
+      <button class="pin-key" onclick="pinPress('7')">7</button>
+      <button class="pin-key" onclick="pinPress('8')">8</button>
+      <button class="pin-key" onclick="pinPress('9')">9</button>
+      <button class="pin-key wide" onclick="closePin()">Abbr.</button>
+      <button class="pin-key" onclick="pinPress('0')">0</button>
+      <button class="pin-key wide" onclick="pinDelete()">← Weg</button>
+    </div>
+    <div class="pin-error" id="pin-error"></div>
+  </div>
+</div>
+
+<!-- SAISON-VERWALTUNG -->
+<div class="overlay" id="season-overlay" onclick="if(event.target===this)closeSeasonForm()">
+  <div class="sheet">
+    <div class="sheet-title">🗓️ Saisons verwalten</div>
+    <div id="season-list" style="margin-bottom:20px"></div>
+    <div class="form-group">
+      <label class="form-label">Neue Saison anlegen</label>
+      <input class="form-input" id="s-name" type="text" placeholder="z. B. Indoor 27/28" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Art</label>
+      <div class="seg-group">
+        <button class="seg-btn active" id="sk-indoor"  onclick="selectSeasonKind('indoor')">🏠 Indoor</button>
+        <button class="seg-btn"        id="sk-outdoor" onclick="selectSeasonKind('outdoor')">☀️ Outdoor</button>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn-cancel" onclick="closeSeasonForm()">Schließen</button>
+      <button class="btn-primary" onclick="createSeason()">Anlegen</button>
+    </div>
+  </div>
+</div>
+
 <!-- LÖSCHEN BESTÄTIGEN -->
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-box">
-    <div class="confirm-title">Spieler löschen?</div>
+    <div class="confirm-title" id="confirm-title-text">Spieler löschen?</div>
     <div class="confirm-text" id="confirm-text"></div>
     <div class="confirm-actions">
       <button class="btn-cancel" onclick="closeConfirm()">Abbrechen</button>
@@ -517,9 +609,39 @@ const StorageService = {
     const {error}=await db.from('players').update({active}).neq('id','00000000-0000-0000-0000-000000000000');
     if(error)throw error;
   },
-  async saveMatch(gameMode,teamCount,assignMode,teams){
+  /* ---- Saisons ---- */
+  async getSeasons(){
+    const {data,error}=await db.from('seasons').select('*').order('created_at',{ascending:false});
+    if(error)throw error; return data||[];
+  },
+  async createSeason(name,kind){
+    const {data,error}=await db.from('seasons')
+      .insert({name,kind,is_active:false}).select().single();
+    if(error)throw error; return data;
+  },
+  async setActiveSeason(id){
+    // erst alle deaktivieren, dann die gewählte aktivieren
+    const {error:e1}=await db.from('seasons').update({is_active:false})
+      .neq('id','00000000-0000-0000-0000-000000000000');
+    if(e1)throw e1;
+    const {error:e2}=await db.from('seasons').update({is_active:true}).eq('id',id);
+    if(e2)throw e2;
+  },
+  async deleteSeason(id){
+    const {error}=await db.from('seasons').delete().eq('id',id);
+    if(error)throw error;
+  },
+
+  /* ---- Match löschen ---- */
+  async deleteMatch(id){
+    // match_teams und match_players hängen per ON DELETE CASCADE dran
+    const {error}=await db.from('matches').delete().eq('id',id);
+    if(error)throw error;
+  },
+
+  async saveMatch(gameMode,teamCount,assignMode,teams,seasonId){
     const {data:match,error:mErr}=await db.from('matches')
-      .insert({game_mode:gameMode,team_count:teamCount,assign_mode:assignMode}).select().single();
+      .insert({game_mode:gameMode,team_count:teamCount,assign_mode:assignMode,season_id:seasonId||null}).select().single();
     if(mErr)throw mErr;
     for(let i=0;i<teams.length;i++){
       const {data:team,error:tErr}=await db.from('match_teams').insert({
@@ -532,10 +654,11 @@ const StorageService = {
     }
     return match.id;
   },
-  async getMatches(limit=40){
-    const {data,error}=await db.from('matches')
-      .select('*, match_teams(*, match_players(*, players(id,name,nickname,ratings)))')
-      .order('played_at',{ascending:false}).limit(limit);
+  async getMatches(limit=40,seasonId){
+    let q=db.from('matches')
+      .select('*, match_teams(*, match_players(*, players(id,name,nickname,ratings)))');
+    if(seasonId)q=q.eq('season_id',seasonId);
+    const {data,error}=await q.order('played_at',{ascending:false}).limit(limit);
     if(error)throw error; return data||[];
   },
   subscribeToPlayers(cb){
@@ -595,7 +718,177 @@ const S={
   subSelection:null,      // {type:'team'|'bench', ti, pi}
   roundNumber:1,
   lastLoserIndex:null,
+  isAdmin:false,
+  seasons:[],
+  activeSeason:null,
+  pinInput:'',
+  newSeasonKind:'indoor',
+  deleteMatchId:null,
+  deleteSeasonId:null,
 };
+
+/* ================================================================
+   ADMIN-MODUS (PIN-geschützt, lokal im Browser gemerkt)
+   ================================================================ */
+const ADMIN_PIN='1907';           // ← hier deinen Wunsch-PIN eintragen
+const ADMIN_KEY='pickup_admin';
+
+function loadAdminState(){
+  S.isAdmin = localStorage.getItem(ADMIN_KEY)==='1';
+  updateAdminUI();
+}
+function updateAdminUI(){
+  const btn=document.getElementById('admin-btn');
+  btn.classList.toggle('on',S.isAdmin);
+  btn.textContent=S.isAdmin?'🔓':'🔒';
+  btn.title=S.isAdmin?'Admin aktiv – tippen zum Verlassen':'Admin-Zugang';
+  document.body.classList.toggle('is-admin',S.isAdmin);
+}
+function toggleAdmin(){
+  if(S.isAdmin){
+    S.isAdmin=false;
+    localStorage.removeItem(ADMIN_KEY);
+    updateAdminUI();
+    renderPlayers();
+    if(!document.getElementById('tab-stats').classList.contains('hidden'))renderStats();
+    showToast('Admin-Modus verlassen','info');
+  }else{
+    openPin();
+  }
+}
+function openPin(){
+  S.pinInput='';
+  updatePinDisplay();
+  document.getElementById('pin-error').textContent='';
+  document.getElementById('pin-overlay').classList.add('open');
+}
+function closePin(){document.getElementById('pin-overlay').classList.remove('open');}
+function updatePinDisplay(){
+  for(let i=0;i<4;i++)
+    document.getElementById('pd-'+i).classList.toggle('filled',i<S.pinInput.length);
+}
+function pinPress(d){
+  if(S.pinInput.length>=4)return;
+  S.pinInput+=d;
+  updatePinDisplay();
+  if(S.pinInput.length===4)setTimeout(checkPin,180);
+}
+function pinDelete(){
+  S.pinInput=S.pinInput.slice(0,-1);
+  updatePinDisplay();
+  document.getElementById('pin-error').textContent='';
+}
+function checkPin(){
+  if(S.pinInput===ADMIN_PIN){
+    S.isAdmin=true;
+    localStorage.setItem(ADMIN_KEY,'1');
+    updateAdminUI();
+    closePin();
+    renderPlayers();
+    if(!document.getElementById('tab-stats').classList.contains('hidden'))renderStats();
+    showToast('Admin-Modus aktiv 🔓','success');
+  }else{
+    document.getElementById('pin-error').textContent='Falscher PIN';
+    S.pinInput='';
+    updatePinDisplay();
+  }
+}
+
+/* ================================================================
+   SAISONS
+   ================================================================ */
+async function loadSeasons(){
+  try{
+    S.seasons=await StorageService.getSeasons();
+    S.activeSeason=S.seasons.find(s=>s.is_active)||S.seasons[0]||null;
+    renderSeasonBar();
+  }catch(e){
+    // Migration evtl. noch nicht ausgeführt
+    document.getElementById('season-select').innerHTML='<option>Keine Saison</option>';
+  }
+}
+function renderSeasonBar(){
+  const sel=document.getElementById('season-select');
+  const kindEl=document.getElementById('season-kind');
+  if(!S.seasons.length){
+    sel.innerHTML='<option value="">Keine Saison angelegt</option>';
+    kindEl.classList.add('hidden');
+    return;
+  }
+  sel.innerHTML=S.seasons.map(s=>
+    `<option value="${s.id}" ${S.activeSeason&&s.id===S.activeSeason.id?'selected':''}>${esc(s.name)}</option>`
+  ).join('') + (S.isAdmin?'<option value="__manage">⚙️ Saisons verwalten…</option>':'');
+
+  if(S.activeSeason?.kind){
+    kindEl.textContent=S.activeSeason.kind==='indoor'?'🏠 Indoor':'☀️ Outdoor';
+    kindEl.className=`season-kind kind-${S.activeSeason.kind}`;
+    kindEl.classList.remove('hidden');
+  }else kindEl.classList.add('hidden');
+}
+async function switchSeason(id){
+  if(id==='__manage'){openSeasonForm();renderSeasonBar();return;}
+  if(!id)return;
+  try{
+    if(S.isAdmin)await StorageService.setActiveSeason(id);
+    S.activeSeason=S.seasons.find(s=>s.id===id)||null;
+    S.seasons=S.seasons.map(s=>({...s,is_active:s.id===id}));
+    renderSeasonBar();
+    if(!document.getElementById('tab-stats').classList.contains('hidden'))renderStats();
+    showToast(`Saison: ${S.activeSeason?.name||'–'}`,'success');
+  }catch(e){showToast('Fehler: '+e.message,'error');}
+}
+function openSeasonForm(){
+  if(!S.isAdmin){showToast('Nur für Admins','error');return;}
+  renderSeasonList();
+  document.getElementById('s-name').value='';
+  selectSeasonKind('indoor');
+  document.getElementById('season-overlay').classList.add('open');
+}
+function closeSeasonForm(){
+  document.getElementById('season-overlay').classList.remove('open');
+  renderSeasonBar();
+}
+function selectSeasonKind(k){
+  S.newSeasonKind=k;
+  document.getElementById('sk-indoor').classList.toggle('active',k==='indoor');
+  document.getElementById('sk-outdoor').classList.toggle('active',k==='outdoor');
+}
+function renderSeasonList(){
+  const el=document.getElementById('season-list');
+  if(!S.seasons.length){
+    el.innerHTML='<div style="color:var(--text3);font-size:.82rem;text-align:center;padding:14px">Noch keine Saison angelegt</div>';
+    return;
+  }
+  el.innerHTML=S.seasons.map(s=>`
+    <div class="season-row ${s.is_active?'active-season':''}">
+      <span class="season-kind kind-${s.kind||'indoor'}">${s.kind==='outdoor'?'☀️':'🏠'}</span>
+      <div style="flex:1;min-width:0">
+        <div class="season-name">${esc(s.name)}</div>
+        <div class="season-meta">${s.is_active?'Aktiv':'Inaktiv'}</div>
+      </div>
+      ${s.is_active?'':`<button class="icon-btn" onclick="switchSeason('${s.id}')" title="Aktivieren">✓</button>`}
+      <button class="icon-btn danger" onclick="askDeleteSeason('${s.id}')" title="Löschen">🗑️</button>
+    </div>`).join('');
+}
+async function createSeason(){
+  const name=document.getElementById('s-name').value.trim();
+  if(!name){showToast('Bitte Namen eingeben','error');return;}
+  try{
+    await StorageService.createSeason(name,S.newSeasonKind);
+    await loadSeasons();
+    renderSeasonList();
+    document.getElementById('s-name').value='';
+    showToast('Saison angelegt ✓','success');
+  }catch(e){showToast('Fehler: '+e.message,'error');}
+}
+function askDeleteSeason(id){
+  const s=S.seasons.find(x=>x.id===id);
+  S.deleteSeasonId=id; S.deleteMatchId=null; S.deleteTargetId=null;
+  document.getElementById('confirm-title-text').textContent='Saison löschen?';
+  document.getElementById('confirm-text').textContent=
+    `"${s?.name||'Saison'}" wird gelöscht. Die Spiele bleiben erhalten, verlieren aber ihre Saison-Zuordnung.`;
+  document.getElementById('confirm-overlay').classList.add('open');
+}
 
 /* ================================================================
    TABS
@@ -660,7 +953,7 @@ function renderGroup(cid,players){
       <div class="card-actions">
         ${(p.phone||p.email)?`<button class="icon-btn" onclick="invitePlayer('${p.id}')">📲</button>`:''}
         <button class="icon-btn" onclick="openPlayerForm('${p.id}')">✏️</button>
-        <button class="icon-btn danger" onclick="askDelete('${p.id}')">🗑️</button>
+        ${S.isAdmin?`<button class="icon-btn danger" onclick="askDelete('${p.id}')">🗑️</button>`:''}
       </div>
     </div>`;
   }).join('');
@@ -767,15 +1060,40 @@ async function savePlayer(){
   finally{btn.disabled=false;}
 }
 function askDelete(id){
-  S.deleteTargetId=id;
+  if(!S.isAdmin){showToast('Spieler löschen ist nur für Admins','error');return;}
+  S.deleteTargetId=id; S.deleteMatchId=null; S.deleteSeasonId=null;
   const p=S.players.find(x=>x.id===id);
+  document.getElementById('confirm-title-text').textContent='Spieler löschen?';
   document.getElementById('confirm-text').textContent=`"${p?dispName(p):'Spieler'}" wird dauerhaft gelöscht.`;
   document.getElementById('confirm-overlay').classList.add('open');
 }
-function closeConfirm(){document.getElementById('confirm-overlay').classList.remove('open');S.deleteTargetId=null;}
+function askDeleteMatch(id,dateStr){
+  if(!S.isAdmin){showToast('Nur für Admins','error');return;}
+  S.deleteMatchId=id; S.deleteTargetId=null; S.deleteSeasonId=null;
+  document.getElementById('confirm-title-text').textContent='Ergebnis löschen?';
+  document.getElementById('confirm-text').textContent=`Das Spiel vom ${dateStr} wird dauerhaft gelöscht und verschwindet aus allen Statistiken.`;
+  document.getElementById('confirm-overlay').classList.add('open');
+}
+function closeConfirm(){
+  document.getElementById('confirm-overlay').classList.remove('open');
+  S.deleteTargetId=null; S.deleteMatchId=null; S.deleteSeasonId=null;
+}
 async function confirmDelete(){
-  try{await StorageService.deletePlayer(S.deleteTargetId);closeConfirm();await renderPlayers();}
-  catch(e){showToast('Fehler: '+e.message,'error');}
+  try{
+    if(S.deleteMatchId){
+      await StorageService.deleteMatch(S.deleteMatchId);
+      closeConfirm(); await renderStats();
+      showToast('Ergebnis gelöscht','success');
+    }else if(S.deleteSeasonId){
+      await StorageService.deleteSeason(S.deleteSeasonId);
+      closeConfirm(); await loadSeasons(); renderSeasonList();
+      showToast('Saison gelöscht','success');
+    }else if(S.deleteTargetId){
+      await StorageService.deletePlayer(S.deleteTargetId);
+      closeConfirm(); await renderPlayers();
+      showToast('Spieler gelöscht','success');
+    }
+  }catch(e){showToast('Fehler: '+e.message,'error');}
 }
 
 /* ================================================================
@@ -1177,7 +1495,7 @@ async function saveMatchResult(){
   }));
   const btn=document.getElementById('save-result-btn'); btn.disabled=true;
   try{
-    await StorageService.saveMatch(r.gameMode,r.teamCount,r.assignMode,teams);
+    await StorageService.saveMatch(r.gameMode,r.teamCount,r.assignMode,teams,S.activeSeason?.id);
     S.lastResult.saved=true;
     S.lastResult.teams=teams;
     // Verlierer-Team merken für die Schnellrotation
@@ -1319,14 +1637,22 @@ async function renderStats(){
   const body=document.getElementById('stats-body');
   body.innerHTML='<div class="load-state">Lade…</div>';
   try{
-    const[matches,players]=await Promise.all([StorageService.getMatches(),StorageService.getPlayers()]);
+    const seasonId=S.activeSeason?.id||null;
+    const[matches,players]=await Promise.all([
+      StorageService.getMatches(40,seasonId),
+      StorageService.getPlayers()
+    ]);
     S.players=players;
     const pMap={}; players.forEach(p=>pMap[p.id]=p);
 
     let html='';
+    if(S.activeSeason)
+      html+=`<div class="admin-banner" style="margin:0 0 4px;background:rgba(59,130,246,.08);border-color:rgba(59,130,246,.28);color:#7db9fa">
+        🗓️ Auswertung für <strong>${esc(S.activeSeason.name)}</strong>
+      </div>`;
 
     if(!matches.length){
-      body.innerHTML='<div class="empty-state"><div class="es-icon">📊</div><p>Noch keine Spiele gespeichert.<br>Erfasse Ergebnisse im Tab <strong>🏆 Ergebnis</strong>.</p></div>';
+      body.innerHTML=html+'<div class="empty-state"><div class="es-icon">📊</div><p>Noch keine Spiele in dieser Saison.<br>Erfasse Ergebnisse im Tab <strong>🏆 Ergebnis</strong>.</p></div>';
       return;
     }
 
@@ -1395,8 +1721,13 @@ async function renderStats(){
             <span style="flex:1;font-size:.72rem;color:var(--text3);margin-left:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(names)}</span>
           </div>`;
         }).join('');
+        const d=fmtDate(m.played_at);
         return `<div class="match-history-row">
-          <div class="mh-meta"><span class="mh-date">${fmtDate(m.played_at)}</span><span class="mh-mode">${m.team_count}×${m.game_mode}er</span></div>
+          <div class="mh-meta">
+            <span class="mh-date">${d}</span>
+            <span class="mh-mode">${m.team_count}×${m.game_mode}er</span>
+            ${S.isAdmin?`<button class="mh-delete" style="margin-left:auto" onclick="askDeleteMatch('${m.id}','${d}')" title="Ergebnis löschen">🗑️</button>`:''}
+          </div>
           <div>${rows}</div>
         </div>`;
       }).join('')}
@@ -1434,6 +1765,8 @@ function invitePlayer(id){
    INIT
    ================================================================ */
 (async function(){
+  loadAdminState();
+  await loadSeasons();
   await renderPlayers();
   refreshBuilder();
   StorageService.subscribeToPlayers(async()=>{await renderPlayers();refreshBuilder();});
