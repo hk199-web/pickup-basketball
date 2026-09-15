@@ -255,6 +255,12 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .toast.error{border-color:var(--red);color:#f87171}
 @keyframes fadeInUp{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 
+.series-score{font-family:'Bebas Neue',sans-serif;font-size:1.5rem;line-height:1;padding:0 4px;flex-shrink:0}
+
+.btn-rematch{border-color:rgba(247,127,0,.4)!important;background:rgba(247,127,0,.1)!important;color:var(--accent)!important;gap:9px!important}
+.btn-rematch:active{background:rgba(247,127,0,.2)!important}
+.ic-rematch{width:24px;height:24px;flex-shrink:0;display:block}
+
 /* ---- SAISON-LEISTE ---- */
 .season-bar{display:flex;align-items:center;gap:8px;padding:8px 16px;background:rgba(19,22,27,.75);border-bottom:1px solid var(--border);position:sticky;top:47px;z-index:99;backdrop-filter:blur(10px)}
 .season-select{flex:1;padding:7px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:700;outline:none;cursor:pointer;min-width:0}
@@ -434,6 +440,24 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
       <div class="empty-state"><div class="es-icon">⚙️</div><p>Noch keine Teams für diese Runde.<br>Erstelle sie unter <strong>⚙️ Teams</strong> — oder lege unten<br>ein vergangenes Spiel manuell an.</p></div>
     </div>
     <div class="results-actions hidden" id="result-actions" style="margin-top:12px">
+      <button class="btn-secondary btn-rematch hidden" id="btn-rematch" onclick="rematch()" style="flex:0 0 100%">
+        <svg class="ic-rematch" viewBox="0 0 124 124" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <g transform="translate(62,62)">
+            <path d="M -43.2 -15.7 A 46 46 0 0 1 43.2 -15.7" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="butt" stroke-dasharray="15 9"/>
+            <polygon points="0,0 -15,-10 -15,10" fill="currentColor" transform="translate(46,-9) rotate(78)"/>
+            <path d="M 43.2 15.7 A 46 46 0 0 1 -43.2 15.7" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="butt" stroke-dasharray="15 9"/>
+            <polygon points="0,0 -15,-10 -15,10" fill="currentColor" transform="translate(-46,9) rotate(258)"/>
+            <circle cx="0" cy="0" r="27" fill="currentColor"/>
+            <g fill="none" stroke="#0a0c0f" stroke-width="4.5" stroke-linecap="round" opacity=".55">
+              <path d="M -27 0 H 27"/>
+              <path d="M 0 -27 V 27"/>
+              <path d="M 0 -27 A 31 31 0 0 0 0 27"/>
+              <path d="M 0 -27 A 31 31 0 0 1 0 27"/>
+            </g>
+          </g>
+        </svg>
+        <span>Revanche – gleiche Teams</span>
+      </button>
       <button class="btn-secondary" onclick="reroll()">🔀 Neu würfeln</button>
       <button class="btn-secondary" id="btn-record" onclick="openResultForm()">📝 Ergebnis</button>
       <button class="btn-secondary" onclick="openSubForm()">🔄 Wechseln</button>
@@ -1405,6 +1429,9 @@ function renderResults(){
   btn.disabled=r.saved;
   btn.textContent=r.saved?'✓ Gespeichert':'📝 Ergebnis';
 
+  // Revanche erst anbieten wenn die Runde abgeschlossen ist
+  document.getElementById('btn-rematch').classList.toggle('hidden',!r.saved);
+
   body.innerHTML=r.teams.map((team,i)=>{
     const color=`var(${TEAM_COLORS[i]})`, bg=`var(${TEAM_COLORS[i]}-bg)`;
     const avg=(team.players.reduce((s,p)=>s+skill(p),0)/team.players.length).toFixed(1);
@@ -1429,6 +1456,7 @@ function renderResults(){
       <div class="team-header" style="background:${bg}">
         <div class="team-dot" style="background:${color}"></div>
         <div class="team-name-label" style="color:${color}">${TEAM_NAMES[i]}</div>
+        ${r.series&&r.series.some(v=>v>0)?`<div class="series-score" style="color:${color}">${r.series[i]||0}</div>`:''}
         <div class="team-skill-total">Ø ${avg}</div>
       </div>
       <div style="padding:0 14px 8px;font-size:.7rem;font-weight:600">${mixStr}</div>
@@ -1620,12 +1648,38 @@ function quickRotate(){
   renderSubForm(); renderResults();
 }
 
+/* ================================================================
+   REVANCHE – gleiche Teams, neue Runde
+   ================================================================ */
+function rematch(){
+  const r=S.lastResult;
+  if(!r){showToast('Noch keine Teams vorhanden','error');return;}
+  if(!r.saved){showToast('Erfasse zuerst das Ergebnis dieser Runde','error');return;}
+
+  // Serie mitzählen: wer hat in dieser Konstellation wie oft gewonnen
+  if(!r.series)r.series=new Array(r.teams.length).fill(0);
+  const winIdx=r.teams.findIndex(t=>t.result==='win');
+  if(winIdx>=0)r.series[winIdx]++;
+  const prevSeries=r.series;
+
+  // Teams identisch übernehmen, Ergebnis zurücksetzen
+  r.teams=r.teams.map(t=>({players:t.players,score:null,result:null}));
+  r.series=prevSeries;
+  r.saved=false;
+  S.roundNumber++;
+  S.lastLoserIndex=null;
+
+  renderResults();
+  showToast(`Revanche – Runde ${S.roundNumber} läuft ⚡`,'success');
+}
+
 /* Nach jedem Wechsel wird das Ergebnis wieder erfassbar (neue Runde) */
 function markNewRound(){
   if(S.lastResult.saved){
     S.roundNumber++;
     S.lastResult.saved=false;
     S.lastResult.teams=S.lastResult.teams.map(t=>({players:t.players,score:null,result:null}));
+    S.lastResult.series=null;   // andere Aufstellung → Serie startet neu
     S.lastLoserIndex=null;
   }
 }
