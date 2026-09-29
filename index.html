@@ -289,6 +289,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .season-meta{font-size:.7rem;color:var(--text3)}
 
 /* ---- MATCH LÖSCHEN ---- */
+.mh-edit{width:26px;height:26px;border-radius:6px;border:none;background:rgba(247,127,0,.12);color:var(--accent);cursor:pointer;font-size:.7rem;flex-shrink:0;display:flex;align-items:center;justify-content:center;margin-right:4px}
+.mh-edit:active{background:rgba(247,127,0,.25)}
 .mh-delete{width:26px;height:26px;border-radius:6px;border:none;background:rgba(239,68,68,.12);color:#f87171;cursor:pointer;font-size:.7rem;flex-shrink:0;display:flex;align-items:center;justify-content:center}
 .mh-delete:active{background:rgba(239,68,68,.25)}
 
@@ -593,6 +595,35 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   </div>
 </div>
 
+<!-- ERGEBNIS KORRIGIEREN -->
+<div class="overlay" id="edit-match-overlay" onclick="if(event.target===this)closeEditMatch()">
+  <div class="sheet">
+    <div class="sheet-title">Ergebnis korrigieren</div>
+    <div class="sub-hint" id="edit-match-date"></div>
+    <div class="sub-hint">Zwei Spieler antippen um sie zu tauschen. Über <strong>⇄</strong> lässt sich ein Spieler gegen jemanden austauschen, der nicht dabei war.</div>
+    <div id="edit-match-teams"></div>
+    <div class="mode-label" style="margin-top:6px">Ausgang</div>
+    <div id="edit-match-result" class="result-team-select"></div>
+    <div style="margin-bottom:14px"><button class="seg-btn" id="edit-draw-btn" onclick="editPickWinner('draw')" style="width:100%">🤝 Unentschieden</button></div>
+    <div class="form-actions">
+      <button class="btn-cancel" onclick="closeEditMatch()">Abbrechen</button>
+      <button class="btn-primary" id="edit-match-save" onclick="saveEditMatch()">💾 Korrektur speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- SPIELER-AUSTAUSCH-PICKER -->
+<div class="overlay" id="swap-pick-overlay" onclick="if(event.target===this)closeSwapPick()">
+  <div class="sheet">
+    <div class="sheet-title">Spieler austauschen</div>
+    <div class="sub-hint" id="swap-pick-hint"></div>
+    <div id="swap-pick-list"></div>
+    <div class="form-actions">
+      <button class="btn-cancel" onclick="closeSwapPick()">Abbrechen</button>
+    </div>
+  </div>
+</div>
+
 <!-- LÖSCHEN BESTÄTIGEN -->
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-box">
@@ -661,6 +692,26 @@ const StorageService = {
     // match_teams und match_players hängen per ON DELETE CASCADE dran
     const {error}=await db.from('matches').delete().eq('id',id);
     if(error)throw error;
+  },
+
+  /* ---- Match nachträglich korrigieren ---- */
+  async updateMatch(matchId,teams){
+    // teams: [{teamId, playerIds:[], result, score}]
+    for(const t of teams){
+      const {error:tErr}=await db.from('match_teams')
+        .update({result:t.result??null,score:t.score??null}).eq('id',t.teamId);
+      if(tErr)throw tErr;
+
+      // Zuordnungen dieses Teams neu setzen
+      const {error:dErr}=await db.from('match_players').delete().eq('team_id',t.teamId);
+      if(dErr)throw dErr;
+
+      const links=t.playerIds.filter(Boolean).map(pid=>({match_id:matchId,team_id:t.teamId,player_id:pid}));
+      if(links.length){
+        const {error:iErr}=await db.from('match_players').insert(links);
+        if(iErr)throw iErr;
+      }
+    }
   },
 
   async saveMatch(gameMode,teamCount,assignMode,teams,seasonId){
@@ -749,6 +800,9 @@ const S={
   newSeasonKind:'indoor',
   deleteMatchId:null,
   deleteSeasonId:null,
+  matchCache:[],
+  editMatch:null,
+  swapTarget:null,
 };
 
 /* ================================================================
@@ -1685,6 +1739,162 @@ function markNewRound(){
 }
 
 /* ================================================================
+   GESPEICHERTES ERGEBNIS KORRIGIEREN
+   ================================================================ */
+function openEditMatch(matchId){
+  if(!S.isAdmin){showToast('Nur für Admins','error');return;}
+  const m=S.matchCache.find(x=>x.id===matchId);
+  if(!m){showToast('Spiel nicht gefunden','error');return;}
+
+  // Arbeitskopie anlegen – Original bleibt unangetastet bis gespeichert wird
+  const teams=(m.match_teams||[]).slice().sort((a,b)=>a.team_index-b.team_index);
+  S.editMatch={
+    id:m.id,
+    date:fmtDate(m.played_at),
+    teams:teams.map(t=>({
+      teamId:t.id,
+      index:t.team_index,
+      result:t.result,
+      score:t.score,
+      players:(t.match_players||[]).map(mp=>mp.players).filter(Boolean),
+    })),
+    isDraw:teams.some(t=>t.result==='draw'),
+    winnerIndex:teams.findIndex(t=>t.result==='win'),
+    selection:null,
+  };
+  document.getElementById('edit-match-date').textContent=`Spiel vom ${S.editMatch.date}`;
+  renderEditMatch();
+  document.getElementById('edit-match-overlay').classList.add('open');
+}
+function closeEditMatch(){
+  document.getElementById('edit-match-overlay').classList.remove('open');
+  S.editMatch=null;
+}
+
+function renderEditMatch(){
+  const e=S.editMatch; if(!e)return;
+
+  document.getElementById('edit-match-teams').innerHTML=e.teams.map((t,ti)=>{
+    const color=`var(${TEAM_COLORS[t.index]||'--text3'})`;
+    const rows=t.players.map((p,pi)=>{
+      const sel=e.selection&&e.selection.ti===ti&&e.selection.pi===pi;
+      const tier=getTier(skill(p));
+      return `<div class="sub-player ${sel?'selected':''}" onclick="editPickPlayer(${ti},${pi})">
+        <span>${tier.icon}</span>
+        <span class="tp-pos">${esc(p.position)}</span>
+        <span class="sub-player-name">${esc(dispName(p))}</span>
+        <button class="assign-btn" style="width:28px;height:28px" onclick="event.stopPropagation();openSwapPick(${ti},${pi})" title="Gegen anderen Spieler austauschen">⇄</button>
+      </div>`;
+    }).join('');
+    return `<div class="sub-group">
+      <div class="sub-group-title" style="color:${color}">
+        <span class="team-dot" style="background:${color}"></span>${TEAM_NAMES[t.index]||'Team'}
+      </div>
+      ${rows||'<div style="padding:10px;color:var(--text3);font-size:.8rem;border:1px dashed var(--border);border-radius:8px;text-align:center">Keine Spieler</div>'}
+    </div>`;
+  }).join('');
+
+  document.getElementById('edit-match-result').innerHTML=e.teams.map((t,ti)=>{
+    const color=`var(${TEAM_COLORS[t.index]||'--text3'})`;
+    const win=!e.isDraw&&e.winnerIndex===ti;
+    const lose=!e.isDraw&&e.winnerIndex>=0&&e.winnerIndex!==ti;
+    return `<div class="rts-card ${win?'winner':''} ${lose?'loser':''}" onclick="editPickWinner(${ti})">
+      <div class="rts-header">
+        <div class="rts-dot" style="background:${color}"></div>
+        <div class="rts-name" style="color:${color}">${TEAM_NAMES[t.index]||'Team'}</div>
+      </div>
+      <div class="rts-players">${t.players.map(p=>esc(dispName(p))).join(', ')||'–'}</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('edit-draw-btn').classList.toggle('active',e.isDraw);
+}
+
+function editPickPlayer(ti,pi){
+  const e=S.editMatch; if(!e)return;
+  const sel=e.selection;
+  if(!sel){ e.selection={ti,pi}; renderEditMatch(); return; }
+  if(sel.ti===ti&&sel.pi===pi){ e.selection=null; renderEditMatch(); return; }
+  const a=e.teams[sel.ti].players[sel.pi];
+  const b=e.teams[ti].players[pi];
+  e.teams[sel.ti].players[sel.pi]=b;
+  e.teams[ti].players[pi]=a;
+  e.selection=null;
+  renderEditMatch();
+  showToast(`${dispName(a)} ↔ ${dispName(b)}`,'success');
+}
+
+function editPickWinner(idx){
+  const e=S.editMatch; if(!e)return;
+  if(idx==='draw'){ e.isDraw=true; e.winnerIndex=-1; }
+  else{ e.isDraw=false; e.winnerIndex=idx; }
+  renderEditMatch();
+}
+
+/* ---- Spieler gegen jemanden austauschen, der nicht dabei war ---- */
+function openSwapPick(ti,pi){
+  const e=S.editMatch; if(!e)return;
+  S.swapTarget={ti,pi};
+  const current=e.teams[ti].players[pi];
+  const inMatch=new Set(e.teams.flatMap(t=>t.players.map(p=>p.id)));
+  const available=S.players.filter(p=>!inMatch.has(p.id));
+
+  document.getElementById('swap-pick-hint').innerHTML=
+    `<strong>${esc(dispName(current))}</strong> ersetzen durch:`;
+
+  const list=document.getElementById('swap-pick-list');
+  list.innerHTML=available.length
+    ? available.map(p=>{
+        const tier=getTier(skill(p));
+        return `<div class="sub-player" onclick="applySwapPick('${p.id}')">
+          <span>${tier.icon}</span>
+          <span class="tp-pos">${esc(p.position)}</span>
+          <span class="sub-player-name">${esc(dispName(p))}</span>
+          <span class="cat-tag cat-${posCat(p)}">${posLabel(p)}</span>
+        </div>`;
+      }).join('')
+    : '<div style="padding:14px;color:var(--text3);font-size:.82rem;text-align:center">Alle Spieler sind bereits in diesem Spiel</div>';
+
+  document.getElementById('swap-pick-overlay').classList.add('open');
+}
+function closeSwapPick(){
+  document.getElementById('swap-pick-overlay').classList.remove('open');
+  S.swapTarget=null;
+}
+function applySwapPick(playerId){
+  const e=S.editMatch, t=S.swapTarget;
+  if(!e||!t)return;
+  const np=S.players.find(p=>p.id===playerId);
+  if(!np)return;
+  const old=e.teams[t.ti].players[t.pi];
+  e.teams[t.ti].players[t.pi]=np;
+  closeSwapPick();
+  renderEditMatch();
+  showToast(`${dispName(old)} → ${dispName(np)}`,'success');
+}
+
+async function saveEditMatch(){
+  const e=S.editMatch; if(!e)return;
+  if(!e.isDraw&&e.winnerIndex<0){showToast('Bitte Ausgang festlegen','error');return;}
+
+  const btn=document.getElementById('edit-match-save');
+  btn.disabled=true;
+  try{
+    const payload=e.teams.map((t,ti)=>({
+      teamId:t.teamId,
+      playerIds:t.players.map(p=>p.id),
+      score:t.score,
+      result:e.isDraw?'draw':(ti===e.winnerIndex?'win':'loss'),
+    }));
+    await StorageService.updateMatch(e.id,payload);
+    closeEditMatch();
+    await renderStats();
+    showToast('Korrektur gespeichert ✓','success');
+  }catch(err){showToast('Fehler: '+err.message,'error');}
+  finally{btn.disabled=false;}
+}
+
+/* ================================================================
    STATISTIK
    ================================================================ */
 async function renderStats(){
@@ -1697,6 +1907,7 @@ async function renderStats(){
       StorageService.getPlayers()
     ]);
     S.players=players;
+    S.matchCache=matches;
     const pMap={}; players.forEach(p=>pMap[p.id]=p);
 
     let html='';
@@ -1780,7 +1991,8 @@ async function renderStats(){
           <div class="mh-meta">
             <span class="mh-date">${d}</span>
             <span class="mh-mode">${m.team_count}×${m.game_mode}er</span>
-            ${S.isAdmin?`<button class="mh-delete" style="margin-left:auto" onclick="askDeleteMatch('${m.id}','${d}')" title="Ergebnis löschen">🗑️</button>`:''}
+            ${S.isAdmin?`<button class="mh-edit" style="margin-left:auto" onclick="openEditMatch('${m.id}')" title="Ergebnis korrigieren">✏️</button>
+            <button class="mh-delete" onclick="askDeleteMatch('${m.id}','${d}')" title="Ergebnis löschen">🗑️</button>`:''}
           </div>
           <div>${rows}</div>
         </div>`;
