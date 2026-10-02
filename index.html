@@ -207,6 +207,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .rts-card{padding:12px;border-radius:var(--radius-sm);border:2px solid var(--border);background:var(--bg3);cursor:pointer;transition:border-color var(--t),background var(--t)}
 .rts-card.winner{border-color:var(--green);background:rgba(34,197,94,.1)}
 .rts-card.loser{opacity:.45}
+.rts-card.static{cursor:default}
+.rts-outcome{font-size:.8rem;color:var(--text2);margin:-4px 0 14px;min-height:1.2em}
 .rts-header{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .rts-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
 .rts-name{font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:.05em}
@@ -520,9 +522,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 <div class="overlay" id="result-overlay" onclick="if(event.target===this)closeResultForm()">
   <div class="sheet">
     <div class="sheet-title">Ergebnis erfassen</div>
-    <p style="font-size:.85rem;color:var(--text2);margin-bottom:14px">Tippe auf das gewinnende Team:</p>
+    <p style="font-size:.85rem;color:var(--text2);margin-bottom:14px">Punkte eintragen – das Team mit den meisten Punkten gewinnt:</p>
     <div class="result-team-select" id="result-team-select"></div>
-    <div style="margin-bottom:14px"><button class="seg-btn" id="draw-btn" onclick="selectResultWinner('draw')" style="width:100%">🤝 Unentschieden</button></div>
+    <div class="rts-outcome" id="result-outcome"></div>
     <div class="form-actions">
       <button class="btn-cancel" onclick="closeResultForm()">Abbrechen</button>
       <button class="btn-primary" id="save-result-btn" onclick="saveMatchResult()">💾 Speichern</button>
@@ -602,9 +604,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <div class="sub-hint" id="edit-match-date"></div>
     <div class="sub-hint">Zwei Spieler antippen um sie zu tauschen. Über <strong>⇄</strong> lässt sich ein Spieler gegen jemanden austauschen, der nicht dabei war.</div>
     <div id="edit-match-teams"></div>
-    <div class="mode-label" style="margin-top:6px">Ausgang</div>
+    <div class="mode-label" style="margin-top:6px">Punkte</div>
     <div id="edit-match-result" class="result-team-select"></div>
-    <div style="margin-bottom:14px"><button class="seg-btn" id="edit-draw-btn" onclick="editPickWinner('draw')" style="width:100%">🤝 Unentschieden</button></div>
+    <div class="rts-outcome" id="edit-match-outcome"></div>
     <div class="form-actions">
       <button class="btn-cancel" onclick="closeEditMatch()">Abbrechen</button>
       <button class="btn-primary" id="edit-match-save" onclick="saveEditMatch()">💾 Korrektur speichern</button>
@@ -827,7 +829,7 @@ const S={
   formRatings:{offense:0,defense:0,rebound:0,einsatz:0,kondition:0},
   gameMode:3, teamCount:2, assignMode:'random', balanceMethod:'skillsum',
   suggestedCount:2, lastResult:null, ratingVisible:{},
-  matchResultForm:{winnerIndex:null,isDraw:false,scores:[]},
+  matchResultForm:{scores:[]},
   manualAssign:{},        // playerId -> teamIndex
   subSelection:null,      // {type:'team'|'bench', ti, pi}
   roundNumber:1,
@@ -1607,57 +1609,61 @@ function renderResults(){
 /* ================================================================
    ERGEBNIS ERFASSEN
    ================================================================ */
-function openResultForm(){
-  const r=S.lastResult; if(!r||r.saved)return;
-  S.matchResultForm={winnerIndex:null,isDraw:false,scores:new Array(r.teams.length).fill('')};
-  document.getElementById('result-team-select').innerHTML=r.teams.map((team,i)=>
-    `<div class="rts-card" id="rts-${i}" onclick="selectResultWinner(${i})">
-      <div class="rts-header">
-        <div class="rts-dot" style="background:var(${TEAM_COLORS[i]})"></div>
-        <div class="rts-name" style="color:var(${TEAM_COLORS[i]})">${TEAM_NAMES[i]}</div>
-      </div>
-      <div class="rts-players">${team.players.map(p=>esc(dispName(p))).join(', ')}</div>
-      <input class="form-input" type="number" inputmode="numeric" placeholder="Punkte (optional)" min="0" style="margin-top:8px"
-        onclick="event.stopPropagation()" oninput="S.matchResultForm.scores[${i}]=this.value">
-    </div>`).join('');
-  document.getElementById('draw-btn').classList.remove('active');
-  document.getElementById('result-overlay').classList.add('open');
-}
-function closeResultForm(){document.getElementById('result-overlay').classList.remove('open');}
-function selectResultWinner(idx){
-  if(idx==='draw'){
-    S.matchResultForm.isDraw=true; S.matchResultForm.winnerIndex=null;
-    document.querySelectorAll('.rts-card').forEach(c=>c.classList.remove('winner','loser'));
-    document.getElementById('draw-btn').classList.add('active');
-  }else{
-    S.matchResultForm.isDraw=false; S.matchResultForm.winnerIndex=idx;
-    document.querySelectorAll('.rts-card').forEach((c,i)=>{
-      c.classList.toggle('winner',i===idx); c.classList.toggle('loser',i!==idx);
-    });
-    document.getElementById('draw-btn').classList.remove('active');
-  }
-}
 // Leere oder ungültige Eingaben → null, sonst ganze Zahl ≥ 0
 function parseScore(v){
   const n=parseInt(v,10);
   return Number.isFinite(n)&&n>=0?n:null;
 }
+/* Sieger ergibt sich allein aus den Punkten: die höchste Punktzahl gewinnt.
+   Liefert {winner} oder {error} (Punkte fehlen / Gleichstand an der Spitze). */
+function scoreOutcome(pts){
+  if(pts.some(p=>p===null))return {error:'Bitte für jedes Team die Punkte eintragen'};
+  const max=Math.max(...pts);
+  if(pts.filter(p=>p===max).length>1)return {error:'Gleichstand – es braucht einen Sieger mit den meisten Punkten'};
+  return {winner:pts.indexOf(max)};
+}
+/* Karten grün/blass färben und Hinweis anzeigen, ohne neu zu rendern (Fokus bleibt im Feld) */
+function paintOutcome(cardSel,outcomeId,pts){
+  const o=scoreOutcome(pts);
+  document.querySelectorAll(cardSel).forEach((c,i)=>{
+    c.classList.toggle('winner',o.winner===i);
+    c.classList.toggle('loser',o.winner!==undefined&&o.winner!==i);
+  });
+  document.getElementById(outcomeId).textContent=
+    o.winner!==undefined?`🏆 Sieger: ${TEAM_NAMES[o.winner]}`:(pts.every(p=>p===null)?'':o.error);
+  return o;
+}
+
+function openResultForm(){
+  const r=S.lastResult; if(!r||r.saved)return;
+  S.matchResultForm={scores:new Array(r.teams.length).fill(null)};
+  document.getElementById('result-team-select').innerHTML=r.teams.map((team,i)=>
+    `<div class="rts-card static" id="rts-${i}">
+      <div class="rts-header">
+        <div class="rts-dot" style="background:var(${TEAM_COLORS[i]})"></div>
+        <div class="rts-name" style="color:var(${TEAM_COLORS[i]})">${TEAM_NAMES[i]}</div>
+      </div>
+      <div class="rts-players">${team.players.map(p=>esc(dispName(p))).join(', ')}</div>
+      <input class="form-input" type="number" inputmode="numeric" placeholder="Punkte" min="0" style="margin-top:8px"
+        oninput="setResultScore(${i},this.value)">
+    </div>`).join('');
+  paintOutcome('#result-team-select .rts-card','result-outcome',S.matchResultForm.scores);
+  document.getElementById('result-overlay').classList.add('open');
+}
+function closeResultForm(){document.getElementById('result-overlay').classList.remove('open');}
+function setResultScore(i,v){
+  S.matchResultForm.scores[i]=parseScore(v);
+  paintOutcome('#result-team-select .rts-card','result-outcome',S.matchResultForm.scores);
+}
 async function saveMatchResult(){
-  const{winnerIndex,isDraw,scores}=S.matchResultForm;
-  if(!isDraw&&winnerIndex===null){showToast('Bitte Sieger-Team tippen','error');return;}
   const r=S.lastResult;
-  // Plausibilität: Sind alle Punkte eingetragen, muss der Sieger die meisten haben
-  const pts=r.teams.map((_,i)=>parseScore(scores[i]));
-  if(pts.every(p=>p!==null)){
-    const max=Math.max(...pts);
-    const top=pts.filter(p=>p===max).length;
-    if(isDraw&&top!==r.teams.length){showToast('Unentschieden, aber die Punkte sind unterschiedlich','error');return;}
-    if(!isDraw&&(pts[winnerIndex]!==max||top>1)){showToast(`${TEAM_NAMES[winnerIndex]} ist als Sieger markiert, hat aber nicht die meisten Punkte`,'error');return;}
-  }
+  const pts=S.matchResultForm.scores;
+  const o=scoreOutcome(pts);
+  if(o.error){showToast(o.error,'error');return;}
   const teams=r.teams.map((team,i)=>({
     players:team.players,
-    score:parseScore(scores[i]),
-    result:isDraw?'draw':i===winnerIndex?'win':'loss',
+    score:pts[i],
+    result:i===o.winner?'win':'loss',
   }));
   const btn=document.getElementById('save-result-btn'); btn.disabled=true;
   try{
@@ -1665,7 +1671,7 @@ async function saveMatchResult(){
     S.lastResult.saved=true;
     S.lastResult.teams=teams;
     // Verlierer-Team merken für die Schnellrotation
-    S.lastLoserIndex = isDraw ? null : teams.findIndex(t=>t.result==='loss');
+    S.lastLoserIndex = teams.findIndex(t=>t.result==='loss');
     closeResultForm(); renderResults();
     showToast('Ergebnis gespeichert 🏆 — jetzt wechseln für die nächste Runde','success');
   }catch(e){showToast('Fehler: '+e.message,'error');}
@@ -1842,8 +1848,6 @@ function openEditMatch(matchId){
       score:t.score,
       players:(t.match_players||[]).map(mp=>mp.players).filter(Boolean),
     })),
-    isDraw:teams.some(t=>t.result==='draw'),
-    winnerIndex:teams.findIndex(t=>t.result==='win'),
     selection:null,
   };
   document.getElementById('edit-match-date').textContent=`Spiel vom ${S.editMatch.date}`;
@@ -1880,18 +1884,17 @@ function renderEditMatch(){
 
   document.getElementById('edit-match-result').innerHTML=e.teams.map((t,ti)=>{
     const color=`var(${TEAM_COLORS[t.index]||'--text3'})`;
-    const win=!e.isDraw&&e.winnerIndex===ti;
-    const lose=!e.isDraw&&e.winnerIndex>=0&&e.winnerIndex!==ti;
-    return `<div class="rts-card ${win?'winner':''} ${lose?'loser':''}" onclick="editPickWinner(${ti})">
+    return `<div class="rts-card static">
       <div class="rts-header">
         <div class="rts-dot" style="background:${color}"></div>
         <div class="rts-name" style="color:${color}">${TEAM_NAMES[t.index]||'Team'}</div>
       </div>
       <div class="rts-players">${t.players.map(p=>esc(dispName(p))).join(', ')||'–'}</div>
+      <input class="form-input" type="number" inputmode="numeric" placeholder="Punkte" min="0" style="margin-top:8px"
+        value="${t.score??''}" oninput="setEditScore(${ti},this.value)">
     </div>`;
   }).join('');
-
-  document.getElementById('edit-draw-btn').classList.toggle('active',e.isDraw);
+  paintOutcome('#edit-match-result .rts-card','edit-match-outcome',e.teams.map(t=>t.score??null));
 }
 
 function editPickPlayer(ti,pi){
@@ -1908,11 +1911,10 @@ function editPickPlayer(ti,pi){
   showToast(`${dispName(a)} ↔ ${dispName(b)}`,'success');
 }
 
-function editPickWinner(idx){
+function setEditScore(ti,v){
   const e=S.editMatch; if(!e)return;
-  if(idx==='draw'){ e.isDraw=true; e.winnerIndex=-1; }
-  else{ e.isDraw=false; e.winnerIndex=idx; }
-  renderEditMatch();
+  e.teams[ti].score=parseScore(v);
+  paintOutcome('#edit-match-result .rts-card','edit-match-outcome',e.teams.map(t=>t.score));
 }
 
 /* ---- Spieler gegen jemanden austauschen, der nicht dabei war ---- */
@@ -1959,7 +1961,8 @@ function applySwapPick(playerId){
 
 async function saveEditMatch(){
   const e=S.editMatch; if(!e)return;
-  if(!e.isDraw&&e.winnerIndex<0){showToast('Bitte Ausgang festlegen','error');return;}
+  const o=scoreOutcome(e.teams.map(t=>t.score??null));
+  if(o.error){showToast(o.error,'error');return;}
 
   const btn=document.getElementById('edit-match-save');
   btn.disabled=true;
@@ -1968,7 +1971,7 @@ async function saveEditMatch(){
       teamId:t.teamId,
       playerIds:t.players.map(p=>p.id),
       score:t.score,
-      result:e.isDraw?'draw':(ti===e.winnerIndex?'win':'loss'),
+      result:ti===o.winner?'win':'loss',
     }));
     await StorageService.updateMatch(e.id,payload);
     closeEditMatch();
