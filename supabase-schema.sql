@@ -11,8 +11,6 @@ CREATE TABLE IF NOT EXISTS players (
   position    TEXT NOT NULL CHECK (position IN ('PG','SG','SF','PF','C')),
   ratings     JSONB NOT NULL DEFAULT '{"offense":0,"defense":0,"rebound":0,"einsatz":0,"kondition":0}',
   active      BOOLEAN NOT NULL DEFAULT true,
-  phone       TEXT,
-  email       TEXT,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
