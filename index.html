@@ -490,8 +490,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <div class="sheet-title" id="form-title">Spieler hinzufügen</div>
     <div class="form-group"><label class="form-label">Spitzname (wird zuerst angezeigt)</label><input class="form-input" id="f-nick" type="text" placeholder="z. B. T-Bone" autocomplete="off"></div>
     <div class="form-group"><label class="form-label">Vollständiger Name *</label><input class="form-input" id="f-name" type="text" placeholder="z. B. Thomas Müller" autocomplete="off"></div>
-    <div class="form-group"><label class="form-label">Handy (für Einladungen)</label><input class="form-input" id="f-phone" type="tel" placeholder="+49 170 1234567" autocomplete="tel"></div>
-    <div class="form-group"><label class="form-label">E-Mail (für Einladungen)</label><input class="form-input" id="f-email" type="email" placeholder="name@beispiel.de" autocomplete="email"></div>
     <div class="form-group">
       <label class="form-label">Position *</label>
       <div class="pos-group">
@@ -658,7 +656,8 @@ function from(table){
 }
 const StorageService = {
   async getPlayers(){
-    const {data,error}=await from('players').select('*').order('name');
+    // Ohne phone/email – Kontaktdaten werden nicht mehr verwendet (Datenschutz)
+    const {data,error}=await from('players').select('id,name,nickname,position,ratings,active,created_at').order('name');
     if(error)throw error; return data||[];
   },
   async insertPlayer(p){
@@ -1084,7 +1083,7 @@ function renderGroup(cid,players){
         </div>
       </div>
       <div class="card-actions">
-        ${(p.phone||p.email)?`<button class="icon-btn" onclick="invitePlayer('${p.id}')">📲</button>`:''}
+        <button class="icon-btn" onclick="invitePlayer('${p.id}')" title="Einladen">📲</button>
         <button class="icon-btn" onclick="openPlayerForm('${p.id}')">✏️</button>
         ${S.isAdmin?`<button class="icon-btn danger" onclick="askDelete('${p.id}')">🗑️</button>`:''}
       </div>
@@ -1156,7 +1155,7 @@ function openPlayerForm(id){
   S.editingId=id; S.selectedPos=null;
   S.formRatings={offense:0,defense:0,rebound:0,einsatz:0,kondition:0};
   buildRatingInputs();
-  ['f-name','f-nick','f-phone','f-email'].forEach(i=>document.getElementById(i).value='');
+  ['f-name','f-nick'].forEach(i=>document.getElementById(i).value='');
   document.querySelectorAll('.pos-pill').forEach(b=>b.classList.remove('active'));
   document.getElementById('pos-cat-hint').textContent='';
   updateTierPreview();
@@ -1165,8 +1164,6 @@ function openPlayerForm(id){
     document.getElementById('form-title').textContent='Spieler bearbeiten';
     document.getElementById('f-name').value=p.name;
     document.getElementById('f-nick').value=p.nickname||'';
-    document.getElementById('f-phone').value=p.phone||'';
-    document.getElementById('f-email').value=p.email||'';
     selectPos(p.position);
     if(p.ratings)RATING_CATS.forEach(c=>{if(p.ratings[c.key])selectFormStar(c.key,p.ratings[c.key]);});
   }else{
@@ -1185,14 +1182,12 @@ function selectPos(pos){
 async function savePlayer(){
   const name=document.getElementById('f-name').value.trim();
   const nick=document.getElementById('f-nick').value.trim();
-  const phone=document.getElementById('f-phone').value.trim();
-  const email=document.getElementById('f-email').value.trim();
   if(!name){showToast('Bitte Namen eingeben.','error');return;}
   if(!S.selectedPos){showToast('Bitte Position wählen.','error');return;}
   if(!RATING_CATS.some(c=>S.formRatings[c.key]>0)){showToast('Bitte mind. eine Kategorie bewerten.','error');return;}
   const btn=document.getElementById('save-player-btn'); btn.disabled=true;
   try{
-    const data={name,nickname:nick||null,position:S.selectedPos,ratings:{...S.formRatings},phone:phone||null,email:email||null};
+    const data={name,nickname:nick||null,position:S.selectedPos,ratings:{...S.formRatings}};
     if(S.editingId){
       await StorageService.updatePlayer(S.editingId,data);
     }else{
@@ -2115,9 +2110,12 @@ function invitePlayer(id){
   const p=S.players.find(x=>x.id===id); if(!p)return;
   const msg=`Hey ${dispName(p)}! Heute Basketball – bist du dabei?\n${window.location.href}`;
   if(navigator.share)navigator.share({title:'Basketball heute!',text:msg}).catch(()=>{});
-  else if(p.phone)window.open(`https://wa.me/${p.phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`,'_blank');
-  else if(p.email)window.location.href=`mailto:${p.email}?subject=Basketball heute!&body=${encodeURIComponent(msg)}`;
-  else navigator.clipboard?.writeText(msg).then(()=>showToast('Link kopiert!','success'));
+  // Keine Kontaktdaten gespeichert (Datenschutz): Teilen-Menü des Handys,
+  // am PC den Einladungstext in die Zwischenablage kopieren.
+  else if(navigator.clipboard)navigator.clipboard.writeText(msg)
+    .then(()=>showToast('Einladung kopiert – jetzt in WhatsApp einfügen','success'))
+    .catch(()=>showToast('Kopieren nicht möglich','error'));
+  else showToast('Teilen wird von diesem Browser nicht unterstützt','error');
 }
 
 /* ================================================================
