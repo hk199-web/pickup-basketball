@@ -275,13 +275,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 
 /* ---- ADMIN ---- */
 .admin-banner{display:flex;align-items:center;gap:7px;margin:10px 16px 0;padding:7px 12px;border-radius:var(--radius-sm);background:rgba(247,127,0,.08);border:1px solid rgba(247,127,0,.28);color:var(--accent);font-size:.72rem;font-weight:700}
-.pin-display{display:flex;justify-content:center;gap:10px;margin:18px 0 22px}
-.pin-dot{width:14px;height:14px;border-radius:50%;background:var(--bg3);border:2px solid var(--border);transition:all var(--t)}
-.pin-dot.filled{background:var(--accent);border-color:var(--accent)}
-.pin-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
-.pin-key{padding:16px 0;border-radius:11px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-family:'Bebas Neue',sans-serif;font-size:1.5rem;cursor:pointer;transition:background var(--t)}
-.pin-key:active{background:var(--border);transform:scale(.94)}
-.pin-key.wide{grid-column:span 1;font-size:1rem;font-family:'DM Sans',sans-serif;font-weight:700;color:var(--text2)}
 .pin-error{text-align:center;color:#f87171;font-size:.8rem;font-weight:600;min-height:20px;margin-top:10px}
 
 /* ---- SAISON-VERWALTUNG ---- */
@@ -482,7 +475,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   </section>
 </div>
 
-<button class="fab hidden" id="fab" onclick="openPlayerForm(null)">＋</button>
+<button class="fab" id="fab" onclick="openPlayerForm(null)">＋</button>
 
 <!-- SPIELER-FORMULAR -->
 <div class="overlay" id="player-overlay" onclick="if(event.target===this)closePlayerForm()">
@@ -543,32 +536,20 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   </div>
 </div>
 
-<!-- PIN-EINGABE -->
-<div class="overlay" id="pin-overlay" onclick="if(event.target===this)closePin()">
+<!-- ADMIN-ANMELDUNG -->
+<div class="overlay" id="login-overlay" onclick="if(event.target===this)closeLogin()">
   <div class="sheet">
-    <div class="sheet-title">🔒 Admin-Zugang</div>
-    <p style="font-size:.85rem;color:var(--text2);margin-bottom:4px">PIN eingeben um Admin-Rechte freizuschalten.</p>
-    <div class="pin-display">
-      <div class="pin-dot" id="pd-0"></div>
-      <div class="pin-dot" id="pd-1"></div>
-      <div class="pin-dot" id="pd-2"></div>
-      <div class="pin-dot" id="pd-3"></div>
-    </div>
-    <div class="pin-pad">
-      <button class="pin-key" onclick="pinPress('1')">1</button>
-      <button class="pin-key" onclick="pinPress('2')">2</button>
-      <button class="pin-key" onclick="pinPress('3')">3</button>
-      <button class="pin-key" onclick="pinPress('4')">4</button>
-      <button class="pin-key" onclick="pinPress('5')">5</button>
-      <button class="pin-key" onclick="pinPress('6')">6</button>
-      <button class="pin-key" onclick="pinPress('7')">7</button>
-      <button class="pin-key" onclick="pinPress('8')">8</button>
-      <button class="pin-key" onclick="pinPress('9')">9</button>
-      <button class="pin-key wide" onclick="closePin()">Abbr.</button>
-      <button class="pin-key" onclick="pinPress('0')">0</button>
-      <button class="pin-key wide" onclick="pinDelete()">← Weg</button>
-    </div>
-    <div class="pin-error" id="pin-error"></div>
+    <div class="sheet-title">🔒 Admin-Anmeldung</div>
+    <p style="font-size:.85rem;color:var(--text2);margin-bottom:14px">Mit deinem Admin-Konto anmelden. Die Anmeldung bleibt auf diesem Gerät gespeichert, bis du dich abmeldest.</p>
+    <form onsubmit="submitLogin(event)">
+      <div class="form-group"><label class="form-label" for="login-email">E-Mail</label><input class="form-input" id="login-email" type="email" autocomplete="username" inputmode="email"></div>
+      <div class="form-group"><label class="form-label" for="login-password">Passwort</label><input class="form-input" id="login-password" type="password" autocomplete="current-password"></div>
+      <div class="pin-error" id="login-error"></div>
+      <div class="form-actions">
+        <button type="button" class="btn-cancel" onclick="closeLogin()">Abbrechen</button>
+        <button type="submit" class="btn-primary" id="login-btn">Anmelden</button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -714,59 +695,28 @@ const StorageService = {
 
   /* ---- Match nachträglich korrigieren ---- */
   async updateMatch(matchId,teams){
-    // teams: [{teamId, playerIds:[], result, score}]
-    // Reihenfolge so gewählt, dass ein Abbruch keine Spieler verliert:
-    // 1) alte Zuordnungen merken, 2) neue einfügen, 3) alte löschen.
-    // Einträge gelöschter Spieler (player_id = null) bleiben unangetastet.
-    const {data:old,error:oErr}=await from('match_players')
-      .select('id').eq('match_id',matchId).not('player_id','is',null);
-    if(oErr)throw oErr;
-
-    const links=teams.flatMap(t=>t.playerIds.filter(Boolean)
-      .map(pid=>({match_id:matchId,team_id:t.teamId,player_id:pid})));
-    if(links.length){
-      const {error:iErr}=await from('match_players').insert(links);
-      if(iErr)throw iErr;
-    }
-    const oldIds=(old||[]).map(r=>r.id);
-    if(oldIds.length){
-      const {error:dErr}=await from('match_players').delete().in('id',oldIds);
-      if(dErr)throw dErr;
-    }
-    for(const t of teams){
-      const {error:tErr}=await from('match_teams')
-        .update({result:t.result??null,score:t.score??null}).eq('id',t.teamId);
-      if(tErr)throw tErr;
-    }
+    // teams: [{teamId, playerIds:[], score}]
+    // Läuft komplett in der Datenbank (Funktion update_match, nur für Admins):
+    // alles oder nichts, Sieger wird dort aus den Punkten bestimmt.
+    if(!db)throw new Error(DB_MISSING_MSG);
+    const {error}=await db.rpc('update_match',{
+      p_match_id:matchId,
+      p_teams:teams.map(t=>({team_id:t.teamId,score:t.score,player_ids:t.playerIds.filter(Boolean)})),
+    });
+    if(error)throw error;
   },
 
   async saveMatch(gameMode,teamCount,assignMode,teams,seasonId){
-    const {data:match,error:mErr}=await from('matches')
-      .insert({game_mode:gameMode,team_count:teamCount,assign_mode:assignMode,season_id:seasonId||null}).select().single();
-    if(mErr)throw mErr;
-    try{
-      // Alle Teams in einem Request anlegen
-      const {data:rows,error:tErr}=await from('match_teams').insert(teams.map((t,i)=>({
-        match_id:match.id,team_index:i,team_name:TEAM_NAMES[i],
-        score:t.score??null,result:t.result??null
-      }))).select('id,team_index');
-      if(tErr)throw tErr;
-      const teamId={}; rows.forEach(r=>teamId[r.team_index]=r.id);
-
-      // Alle Spieler-Zuordnungen in einem Request anlegen
-      const links=teams.flatMap((t,i)=>t.players.filter(p=>p.id)
-        .map(p=>({match_id:match.id,team_id:teamId[i],player_id:p.id})));
-      if(links.length){
-        const {error:pErr}=await from('match_players').insert(links);
-        if(pErr)throw pErr;
-      }
-    }catch(e){
-      // Halb gespeichertes Spiel wieder entfernen (Teams/Spieler hängen per CASCADE dran),
-      // damit keine kaputten Einträge in der Statistik landen.
-      await from('matches').delete().eq('id',match.id).then(()=>{},()=>{});
-      throw e;
-    }
-    return match.id;
+    // Läuft komplett in der Datenbank (Funktion save_match): alles oder nichts,
+    // Punkte werden dort geprüft und der Sieger daraus bestimmt.
+    if(!db)throw new Error(DB_MISSING_MSG);
+    const {data,error}=await db.rpc('save_match',{
+      p_game_mode:gameMode, p_team_count:teamCount, p_assign_mode:assignMode,
+      p_season_id:seasonId||null,
+      p_teams:teams.map(t=>({score:t.score,player_ids:t.players.filter(p=>p.id).map(p=>p.id)})),
+    });
+    if(error)throw error;
+    return data;
   },
   async getMatches(limit=1000,seasonId){
     let q=from('matches')
@@ -836,7 +786,6 @@ const S={
   isAdmin:false,
   seasons:[],
   activeSeason:null,
-  pinInput:'',
   newSeasonKind:'indoor',
   deleteMatchId:null,
   deleteSeasonId:null,
@@ -846,75 +795,77 @@ const S={
 };
 
 /* ================================================================
-   ADMIN-MODUS (PIN-geschützt, lokal im Browser gemerkt)
+   ADMIN-MODUS (Supabase-Anmeldung + Prüfung in der Datenbank)
    ================================================================ */
-const ADMIN_PIN='1907';           // ← hier deinen Wunsch-PIN eintragen
-const ADMIN_KEY='pickup_admin';
-
-// localStorage kann im privaten Modus oder bei blockierten Website-Daten werfen
-function lsGet(k){try{return localStorage.getItem(k);}catch(e){return null;}}
-function lsSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
-function lsRemove(k){try{localStorage.removeItem(k);}catch(e){}}
-
-function loadAdminState(){
-  S.isAdmin = lsGet(ADMIN_KEY)==='1';
+/* Admin = angemeldetes Supabase-Konto, das in der Tabelle "admins" steht.
+   Was ein Admin darf, prüft die Datenbank selbst (RLS-Regeln, siehe
+   migration-admin-schutz.sql). Die Anzeige hier blendet nur Knöpfe ein/aus. */
+async function refreshAdmin(){
+  let admin=false;
+  try{
+    const {data:{session}}=await db.auth.getSession();
+    if(session){
+      const {data,error}=await db.rpc('is_admin');
+      admin=!error&&data===true;
+    }
+  }catch(e){admin=false;}
+  const changed=admin!==S.isAdmin;
+  S.isAdmin=admin;
   updateAdminUI();
+  if(changed){
+    renderPlayerLists(); renderSeasonBar();
+    if(!document.getElementById('tab-stats').classList.contains('hidden'))renderStats();
+  }
+  return admin;
 }
 function updateAdminUI(){
   const btn=document.getElementById('admin-btn');
   btn.classList.toggle('on',S.isAdmin);
   btn.textContent=S.isAdmin?'🔓':'🔒';
-  btn.title=S.isAdmin?'Admin aktiv – tippen zum Verlassen':'Admin-Zugang';
+  btn.title=S.isAdmin?'Admin angemeldet – tippen zum Abmelden':'Admin-Anmeldung';
   document.body.classList.toggle('is-admin',S.isAdmin);
 }
-function toggleAdmin(){
+async function toggleAdmin(){
+  if(!db){showToast(DB_MISSING_MSG,'error');return;}
   if(S.isAdmin){
-    S.isAdmin=false;
-    lsRemove(ADMIN_KEY);
-    updateAdminUI();
-    renderPlayers();
-    if(!document.getElementById('tab-stats').classList.contains('hidden'))renderStats();
-    showToast('Admin-Modus verlassen','info');
+    await db.auth.signOut().catch(()=>{});
+    await refreshAdmin();
+    showToast('Abgemeldet','info');
   }else{
-    openPin();
+    openLogin();
   }
 }
-function openPin(){
-  S.pinInput='';
-  updatePinDisplay();
-  document.getElementById('pin-error').textContent='';
-  document.getElementById('pin-overlay').classList.add('open');
+function openLogin(){
+  document.getElementById('login-error').textContent='';
+  document.getElementById('login-password').value='';
+  document.getElementById('login-overlay').classList.add('open');
+  setTimeout(()=>document.getElementById('login-email').focus(),240);
 }
-function closePin(){document.getElementById('pin-overlay').classList.remove('open');}
-function updatePinDisplay(){
-  for(let i=0;i<4;i++)
-    document.getElementById('pd-'+i).classList.toggle('filled',i<S.pinInput.length);
+function closeLogin(){
+  document.getElementById('login-overlay').classList.remove('open');
+  document.getElementById('login-password').value='';
 }
-function pinPress(d){
-  if(S.pinInput.length>=4)return;
-  S.pinInput+=d;
-  updatePinDisplay();
-  if(S.pinInput.length===4)setTimeout(checkPin,180);
-}
-function pinDelete(){
-  S.pinInput=S.pinInput.slice(0,-1);
-  updatePinDisplay();
-  document.getElementById('pin-error').textContent='';
-}
-function checkPin(){
-  if(S.pinInput===ADMIN_PIN){
-    S.isAdmin=true;
-    lsSet(ADMIN_KEY,'1');
-    updateAdminUI();
-    closePin();
-    renderPlayers();
-    if(!document.getElementById('tab-stats').classList.contains('hidden'))renderStats();
-    showToast('Admin-Modus aktiv 🔓','success');
-  }else{
-    document.getElementById('pin-error').textContent='Falscher PIN';
-    S.pinInput='';
-    updatePinDisplay();
-  }
+async function submitLogin(ev){
+  ev.preventDefault();
+  const email=document.getElementById('login-email').value.trim();
+  const password=document.getElementById('login-password').value;
+  const err=document.getElementById('login-error');
+  const btn=document.getElementById('login-btn');
+  if(!email||!password){err.textContent='Bitte E-Mail und Passwort eingeben';return;}
+  btn.disabled=true; err.textContent='';
+  try{
+    const {error}=await db.auth.signInWithPassword({email,password});
+    if(error){err.textContent='Anmeldung fehlgeschlagen – E-Mail oder Passwort falsch';return;}
+    if(!await refreshAdmin()){
+      // Konto existiert, ist aber kein Admin → gleich wieder abmelden
+      await db.auth.signOut().catch(()=>{});
+      err.textContent='Dieses Konto hat keine Admin-Rechte';
+      return;
+    }
+    closeLogin();
+    showToast('Admin angemeldet 🔓','success');
+  }catch(e){err.textContent='Verbindungsfehler: '+e.message;}
+  finally{btn.disabled=false;}
 }
 
 /* ================================================================
@@ -1084,7 +1035,7 @@ function renderGroup(cid,players){
       </div>
       <div class="card-actions">
         <button class="icon-btn" onclick="invitePlayer('${p.id}')" title="Einladen">📲</button>
-        <button class="icon-btn" onclick="openPlayerForm('${p.id}')">✏️</button>
+        ${S.isAdmin?`<button class="icon-btn" onclick="openPlayerForm('${p.id}')">✏️</button>`:''}
         ${S.isAdmin?`<button class="icon-btn danger" onclick="askDelete('${p.id}')">🗑️</button>`:''}
       </div>
     </div>`;
@@ -2130,9 +2081,14 @@ function scheduleReload(){
 }
 
 (async function(){
-  loadAdminState();
   registerServiceWorker();
-  if(!db){setConn(false);showToast(DB_MISSING_MSG,'error');refreshBuilder();return;}
+  if(!db){setConn(false);updateAdminUI();showToast(DB_MISSING_MSG,'error');refreshBuilder();return;}
+  await refreshAdmin();
+  // Abmelden in einem anderen Tab oder abgelaufene Sitzung → Admin-Status neu prüfen.
+  // (setTimeout: Supabase-Aufrufe direkt im Callback können hängen bleiben)
+  db.auth.onAuthStateChange(ev=>{
+    if(ev==='SIGNED_OUT'||ev==='SIGNED_IN'||ev==='TOKEN_REFRESHED')setTimeout(refreshAdmin,0);
+  });
   await loadSeasons();
   await renderPlayers();
   refreshBuilder();
