@@ -15,7 +15,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.min.js"></script>
+<!-- Feste Version + Integritätsprüfung (SRI, B05): Bei einem Versionswechsel den Hash neu berechnen -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.min.js"
+  integrity="sha384-WgXwGL6fUsYJWNaKJgVbrJKGRQwc1vieh2oy4kw9nXqpNDz3tdSsqEYUgeHD/NuF" crossorigin="anonymous"></script>
 
 <style>
 :root{
@@ -481,8 +483,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 <div class="overlay" id="player-overlay" onclick="if(event.target===this)closePlayerForm()">
   <div class="sheet">
     <div class="sheet-title" id="form-title">Spieler hinzufügen</div>
-    <div class="form-group"><label class="form-label">Spitzname (wird zuerst angezeigt)</label><input class="form-input" id="f-nick" type="text" placeholder="z. B. T-Bone" autocomplete="off"></div>
-    <div class="form-group"><label class="form-label">Vollständiger Name *</label><input class="form-input" id="f-name" type="text" placeholder="z. B. Thomas Müller" autocomplete="off"></div>
+    <div class="form-group"><label class="form-label">Spitzname * (öffentlich sichtbar)</label><input class="form-input" id="f-nick" type="text" placeholder="z. B. T-Bone" autocomplete="off"></div>
+    <div class="form-group"><label class="form-label">Vollständiger Name * (sieht nur der Admin)</label><input class="form-input" id="f-name" type="text" placeholder="z. B. Thomas Müller" autocomplete="off"></div>
     <div class="form-group">
       <label class="form-label">Position *</label>
       <div class="pos-group">
@@ -631,25 +633,29 @@ const DB_MISSING_MSG = 'Keine Verbindung zur Datenbank – bitte Internet prüfe
 /* ================================================================
    STORAGE SERVICE
    ================================================================ */
+// Öffentliche Spalten von players; "name" (echter Name) nur für Admins (B07)
+const PLAYER_PUBLIC_COLS='id,nickname,position,ratings,active,created_at';
+function playerCols(){return S.isAdmin?PLAYER_PUBLIC_COLS+',name':PLAYER_PUBLIC_COLS;}
 function from(table){
   if(!db)throw new Error(DB_MISSING_MSG);
   return db.from(table);
 }
 const StorageService = {
   async getPlayers(){
-    // Ohne phone/email – Kontaktdaten werden nicht mehr verwendet (Datenschutz)
-    const {data,error}=await from('players').select('id,name,nickname,position,ratings,active,created_at').order('name');
+    // Echte Namen darf nur der Admin lesen (Spaltenrecht in der Datenbank, B07);
+    // Besucher laden nur die öffentlichen Spalten.
+    const {data,error}=await from('players').select(playerCols()).order('nickname');
     if(error)throw error; return data||[];
   },
   async insertPlayer(p){
     // id vergibt die Datenbank (gen_random_uuid) – kein crypto.randomUUID nötig
-    const {data,error}=await from('players').insert(p).select().single();
+    const {data,error}=await from('players').insert(p).select(PLAYER_PUBLIC_COLS).single();
     if(error)throw error; return data;
   },
   async updatePlayer(id,fields){
     // Nur die geänderten Felder schreiben, damit parallele Änderungen
     // anderer Geräte (z.B. aktiv/inaktiv) nicht überschrieben werden.
-    const {data,error}=await from('players').update(fields).eq('id',id).select();
+    const {data,error}=await from('players').update(fields).eq('id',id).select('id');
     if(error)throw error;
     if(!data?.length)throw new Error('Spieler existiert nicht mehr');
     return data[0];
@@ -720,7 +726,7 @@ const StorageService = {
   },
   async getMatches(limit=1000,seasonId){
     let q=from('matches')
-      .select('*, match_teams(*, match_players(*, players(id,name,nickname,position,ratings)))');
+      .select('*, match_teams(*, match_players(*, players('+playerCols()+')))');
     if(seasonId)q=q.eq('season_id',seasonId);
     const {data,error}=await q.order('played_at',{ascending:false}).limit(limit);
     if(error)throw error; return data||[];
@@ -757,11 +763,25 @@ function posLabel(p){ return POS_CATS[p.position]?.label || '–'; }
 /* ================================================================
    UTILS
    ================================================================ */
-function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+// Rating-Wert sicher als ganze Zahl 0–5 (B01): Text oder HTML aus der Datenbank wird nie ausgegeben
+function ratingVal(v){const n=Math.round(Number(v));return Number.isFinite(n)?Math.min(5,Math.max(0,n)):0;}
+/* Fehlermeldungen für Nutzer ohne technische Einzelheiten (B09).
+   Eigene Meldungen aus den Datenbank-Funktionen (RAISE, Code P0001) sind bereits verständlich. */
+function userMsg(e){
+  console.error(e);
+  const code=e&&e.code, msg=String(e&&e.message||'');
+  if(code==='P0001')return msg;
+  if(code==='42501'||/row-level security|permission denied/i.test(msg))return 'Keine Berechtigung – dafür bitte als Admin anmelden';
+  if(code==='23514'||code==='23502')return 'Eingabe ungültig – bitte Werte prüfen';
+  if(/fetch|network|Failed to|Load failed/i.test(msg))return 'Keine Verbindung – bitte Internet prüfen';
+  if(msg===DB_MISSING_MSG)return msg;
+  return 'Etwas ist schiefgelaufen – bitte erneut versuchen';
+}
 function initials(n){return n.split(' ').map(w=>w[0]||'').join('').slice(0,2).toUpperCase()||'?';}
 function renderStars(n){let s='';for(let i=1;i<=5;i++)s+=`<span class="${i<=n?'star-on':'star-off'}">${i<=n?'★':'☆'}</span>`;return s;}
 function shuffle(a){const b=[...a];for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]];}return b;}
-function avgRating(r){if(!r)return 0;return RATING_CATS.map(c=>r[c.key]||0).reduce((a,b)=>a+b,0)/RATING_CATS.length;}
+function avgRating(r){if(!r)return 0;return RATING_CATS.map(c=>ratingVal(r[c.key])).reduce((a,b)=>a+b,0)/RATING_CATS.length;}
 function skill(p){return avgRating(p.ratings)||0;}
 function getTier(a){if(a>=4.2)return{key:'elite',label:'Elite',icon:'💎'};if(a>=3.2)return{key:'gold',label:'Gold',icon:'🥇'};if(a>=2.0)return{key:'silver',label:'Silber',icon:'🥈'};return{key:'bronze',label:'Bronze',icon:'🥉'};}
 function setConn(ok){const d=document.getElementById('conn-dot');d.classList.toggle('ok',ok);d.classList.toggle('err',!ok);}
@@ -813,7 +833,7 @@ async function refreshAdmin(){
   S.isAdmin=admin;
   updateAdminUI();
   if(changed){
-    renderPlayerLists(); renderSeasonBar();
+    renderPlayers(); renderSeasonBar();
     if(!document.getElementById('tab-stats').classList.contains('hidden'))renderStats();
   }
   return admin;
@@ -864,7 +884,7 @@ async function submitLogin(ev){
     }
     closeLogin();
     showToast('Admin angemeldet 🔓','success');
-  }catch(e){err.textContent='Verbindungsfehler: '+e.message;}
+  }catch(e){err.textContent=userMsg(e);}
   finally{btn.disabled=false;}
 }
 
@@ -909,7 +929,7 @@ async function switchSeason(id){
     renderSeasonBar();
     if(!document.getElementById('tab-stats').classList.contains('hidden'))renderStats();
     showToast(`Saison: ${S.activeSeason?.name||'–'}`,'success');
-  }catch(e){showToast('Fehler: '+e.message,'error');}
+  }catch(e){showToast(userMsg(e),'error');}
 }
 function openSeasonForm(){
   if(!S.isAdmin){showToast('Nur für Admins','error');return;}
@@ -953,7 +973,7 @@ async function createSeason(){
     renderSeasonList();
     document.getElementById('s-name').value='';
     showToast('Saison angelegt ✓','success');
-  }catch(e){showToast('Fehler: '+e.message,'error');}
+  }catch(e){showToast(userMsg(e),'error');}
 }
 function askDeleteSeason(id){
   const s=S.seasons.find(x=>x.id===id);
@@ -990,7 +1010,7 @@ async function renderPlayers(){
     if(req!==_playersReq)return;
     S.players=all;
     renderPlayerLists();
-  }catch(e){if(req===_playersReq)showToast('Verbindungsfehler: '+e.message,'error');}
+  }catch(e){if(req===_playersReq)showToast(userMsg(e),'error');}
 }
 function renderPlayerLists(){
   const all=S.players;
@@ -1009,17 +1029,18 @@ function renderGroup(cid,players){
   if(!players.length){el.innerHTML='';return;}
   el.innerHTML=players.map(p=>{
     const tier=getTier(avgRating(p.ratings)), vis=S.ratingVisible[p.id]!==false, cat=posCat(p);
-    const nameHTML=p.nickname
+    // Echter Name kommt nur beim Admin aus der Datenbank (B07)
+    const nameHTML=p.name&&p.nickname
       ? `<span class="player-nick">${esc(p.nickname)}</span><span class="player-realname">${esc(p.name)}</span>`
-      : `<span class="player-name-only">${esc(p.name)}</span>`;
+      : `<span class="player-name-only">${esc(dispName(p))}</span>`;
     const bars=RATING_CATS.map(c=>{
-      const v=p.ratings?.[c.key]||0;
+      const v=ratingVal(p.ratings?.[c.key]);   // nur Zahl 0–5, nie Text (B01)
       return `<div class="rating-row"><span class="rating-label">${c.label}</span><div class="rating-track"><div class="rating-fill" style="width:${v*20}%"></div></div><span class="rating-val">${v}</span></div>`;
     }).join('');
     return `<div class="player-card ${p.active?'':'inactive'}">
       <div class="player-toggle" onclick="toggleActive('${p.id}')">
         <div class="status-dot"></div>
-        <div class="player-avatar tier-${tier.key}">${tier.icon}<span class="avatar-initials">${esc(initials(p.name))}</span></div>
+        <div class="player-avatar tier-${tier.key}">${tier.icon}<span class="avatar-initials">${esc(initials(p.name||p.nickname||''))}</span></div>
         <div class="player-info">
           <div class="player-name-row">${nameHTML}</div>
           <div class="player-meta">
@@ -1065,7 +1086,7 @@ async function toggleActive(id){
   }catch(e){
     const cur=S.players.find(x=>x.id===id); if(cur)cur.active=!next;
     renderPlayerLists(); refreshBuilder();
-    showToast('Fehler: '+e.message,'error');
+    showToast(userMsg(e),'error');
   }finally{
     _toggling.delete(id);
   }
@@ -1077,7 +1098,7 @@ async function newGameDay(){
     await renderPlayers();
     S.roundNumber=1; S.manualAssign={};
     showToast('Alle Spieler aktiviert 🏀','success');
-  }catch(e){showToast('Fehler: '+e.message,'error');}
+  }catch(e){showToast(userMsg(e),'error');}
 }
 
 /* ================================================================
@@ -1133,12 +1154,14 @@ function selectPos(pos){
 async function savePlayer(){
   const name=document.getElementById('f-name').value.trim();
   const nick=document.getElementById('f-nick').value.trim();
+  if(!nick){showToast('Bitte Spitznamen eingeben.','error');return;}
   if(!name){showToast('Bitte Namen eingeben.','error');return;}
+  if(name.length>40||nick.length>40){showToast('Name und Spitzname höchstens 40 Zeichen.','error');return;}
   if(!S.selectedPos){showToast('Bitte Position wählen.','error');return;}
   if(!RATING_CATS.some(c=>S.formRatings[c.key]>0)){showToast('Bitte mind. eine Kategorie bewerten.','error');return;}
   const btn=document.getElementById('save-player-btn'); btn.disabled=true;
   try{
-    const data={name,nickname:nick||null,position:S.selectedPos,ratings:{...S.formRatings}};
+    const data={name,nickname:nick,position:S.selectedPos,ratings:{...S.formRatings}};
     if(S.editingId){
       await StorageService.updatePlayer(S.editingId,data);
     }else{
@@ -1146,7 +1169,7 @@ async function savePlayer(){
     }
     closePlayerForm(); await renderPlayers();
     showToast(S.editingId?'Gespeichert ✓':'Spieler hinzugefügt ✓','success');
-  }catch(e){showToast('Fehler: '+e.message,'error');}
+  }catch(e){showToast(userMsg(e),'error');}
   finally{btn.disabled=false;}
 }
 function askDelete(id){
@@ -1186,7 +1209,7 @@ async function confirmDelete(){
       closeConfirm(); await renderPlayers();
       showToast('Spieler gelöscht','success');
     }
-  }catch(e){showToast('Fehler: '+e.message,'error');}
+  }catch(e){showToast(userMsg(e),'error');}
   finally{_deleting=false;}
 }
 
@@ -1517,7 +1540,7 @@ function renderResults(){
     ].filter(Boolean).join(' · ');
     const rows=team.players.map(p=>{
       const tier=getTier(skill(p));
-      const nm=p.nickname?`${esc(p.nickname)} <span class="tp-nick">${esc(p.name)}</span>`:esc(p.name);
+      const nm=esc(dispName(p))+(p.name&&p.nickname?` <span class="tp-nick">${esc(p.name)}</span>`:'');
       return `<div class="tp-row">
         <div class="tp-avatar tier-${tier.key}">${tier.icon}</div>
         <span class="tp-pos">${esc(p.position)}</span>
@@ -1620,7 +1643,7 @@ async function saveMatchResult(){
     S.lastLoserIndex = teams.findIndex(t=>t.result==='loss');
     closeResultForm(); renderResults();
     showToast('Ergebnis gespeichert 🏆 — jetzt wechseln für die nächste Runde','success');
-  }catch(e){showToast('Fehler: '+e.message,'error');}
+  }catch(e){showToast(userMsg(e),'error');}
   finally{btn.disabled=false;}
 }
 
@@ -1923,7 +1946,7 @@ async function saveEditMatch(){
     closeEditMatch();
     await renderStats();
     showToast('Korrektur gespeichert ✓','success');
-  }catch(err){showToast('Fehler: '+err.message,'error');}
+  }catch(err){showToast(userMsg(err),'error');}
   finally{btn.disabled=false;}
 }
 
@@ -2040,7 +2063,7 @@ async function renderStats(){
     body.innerHTML=html;
   }catch(e){
     if(req!==_statsReq)return;
-    body.innerHTML=`<div class="empty-state"><div class="es-icon">⚠️</div><p>Fehler beim Laden.<br>${esc(e.message)}</p></div>`;
+    body.innerHTML=`<div class="empty-state"><div class="es-icon">⚠️</div><p>Fehler beim Laden.<br>${esc(userMsg(e))}</p></div>`;
   }
 }
 
