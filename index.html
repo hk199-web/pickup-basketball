@@ -586,6 +586,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   <div class="sheet">
     <div class="sheet-title">Ergebnis korrigieren</div>
     <div class="sub-hint" id="edit-match-date"></div>
+    <div class="mode-label">Saison</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <select class="form-input" id="edit-match-season" style="flex:1"></select>
+      <button class="btn-secondary" id="edit-match-move" onclick="moveMatchSeason()" style="flex:0 0 auto">Verschieben</button>
+    </div>
     <div class="sub-hint">Zwei Spieler antippen um sie zu tauschen. Über <strong>⇄</strong> lässt sich ein Spieler gegen jemanden austauschen, der nicht dabei war.</div>
     <div id="edit-match-teams"></div>
     <div class="mode-label" style="margin-top:6px">Punkte</div>
@@ -696,6 +701,14 @@ const StorageService = {
   },
 
   /* ---- Match löschen ---- */
+  /* ---- Spiel einer anderen Saison zuordnen (nur Admin, RLS admin_all) ---- */
+  async setMatchSeason(id,seasonId){
+    const {data,error}=await from('matches').update({season_id:seasonId||null}).eq('id',id).select('id');
+    if(error)throw error;
+    // Ohne Admin-Recht filtert RLS die Zeile weg: kein Fehler, aber 0 Zeilen
+    if(!data?.length)throw {code:'42501',message:'permission denied'};
+  },
+
   async deleteMatch(id){
     // match_teams und match_players hängen per ON DELETE CASCADE dran
     const {error}=await from('matches').delete().eq('id',id);
@@ -1879,6 +1892,10 @@ function openEditMatch(matchId){
     selection:null,
   };
   document.getElementById('edit-match-date').textContent=`Spiel vom ${S.editMatch.date}`;
+  S.editMatch.seasonId=m.season_id||'';
+  document.getElementById('edit-match-season').innerHTML=
+    S.seasons.map(se=>`<option value="${esc(se.id)}" ${se.id===m.season_id?'selected':''}>${esc(se.name)}</option>`).join('')
+    +`<option value="" ${m.season_id?'':'selected'}>(keine Saison)</option>`;
   renderEditMatch();
   document.getElementById('edit-match-overlay').classList.add('open');
 }
@@ -1985,6 +2002,24 @@ function applySwapPick(playerId){
   closeSwapPick();
   renderEditMatch();
   showToast(`${dispName(old)} → ${dispName(np)}`,'success');
+}
+
+/* Spiel in eine andere Saison verschieben – eigener, einzelner Schritt */
+async function moveMatchSeason(){
+  const e=S.editMatch; if(!e)return;
+  const sel=document.getElementById('edit-match-season');
+  const target=sel.value;
+  if(target===e.seasonId){showToast('Das Spiel ist bereits in dieser Saison','info');return;}
+  const name=target?(S.seasons.find(x=>x.id===target)?.name||'Saison'):'keine Saison';
+  if(!confirm(`Spiel vom ${e.date} nach „${name}“ verschieben?`))return;
+  const btn=document.getElementById('edit-match-move'); btn.disabled=true;
+  try{
+    await StorageService.setMatchSeason(e.id,target);
+    closeEditMatch();
+    await renderStats();
+    showToast(`Spiel nach „${name}“ verschoben`,'success');
+  }catch(err){showToast(userMsg(err),'error');}
+  finally{btn.disabled=false;}
 }
 
 async function saveEditMatch(){
