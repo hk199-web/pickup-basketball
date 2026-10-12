@@ -271,6 +271,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .season-bar{display:flex;align-items:center;gap:8px;padding:8px 16px;background:rgba(19,22,27,.75);border-bottom:1px solid var(--border);position:sticky;top:47px;z-index:99;backdrop-filter:blur(10px)}
 .season-select{flex:1;padding:7px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:700;outline:none;cursor:pointer;min-width:0}
 .season-select:focus{border-color:var(--accent)}
+.season-select:disabled{opacity:1;cursor:not-allowed;border-color:rgba(34,197,94,.45)}
+.voice-btn{width:100%;margin-bottom:12px}
+.voice-btn.listening{border-color:var(--red)!important;color:var(--red)!important;background:rgba(239,68,68,.1)!important}
+.result-season-hint{font-size:.78rem;color:var(--text2);margin:-8px 0 12px}
 .season-kind{font-size:.62rem;font-weight:700;padding:3px 7px;border-radius:4px;border:1px solid;flex-shrink:0}
 .kind-indoor{color:#7db9fa;border-color:rgba(59,130,246,.35);background:rgba(59,130,246,.1)}
 .kind-outdoor{color:#fbbf24;border-color:rgba(251,191,36,.35);background:rgba(251,191,36,.1)}
@@ -356,6 +360,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
       <option>Lade…</option>
     </select>
     <span class="season-kind hidden" id="season-kind"></span>
+    <button class="admin-btn" id="season-lock-btn" onclick="toggleSeasonLock()" title="Saison auf diesem Gerät festhalten">📌</button>
     <button class="admin-btn" id="admin-btn" onclick="toggleAdmin()" title="Admin">🔒</button>
   </div>
 
@@ -519,6 +524,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   <div class="sheet">
     <div class="sheet-title">Ergebnis erfassen</div>
     <p style="font-size:.85rem;color:var(--text2);margin-bottom:14px">Punkte eintragen – das Team mit den meisten Punkten gewinnt, bei Gleichstand ist es unentschieden:</p>
+    <div class="result-season-hint" id="result-season-hint"></div>
+    <button class="btn-secondary voice-btn hidden" id="result-voice-btn" onclick="voiceScores('result')">🎤 Ergebnis einsprechen</button>
     <div class="result-team-select" id="result-team-select"></div>
     <div class="rts-outcome" id="result-outcome"></div>
     <div class="form-actions">
@@ -594,6 +601,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <div class="sub-hint">Zwei Spieler antippen um sie zu tauschen. Über <strong>⇄</strong> lässt sich ein Spieler gegen jemanden austauschen, der nicht dabei war.</div>
     <div id="edit-match-teams"></div>
     <div class="mode-label" style="margin-top:6px">Punkte</div>
+    <button class="btn-secondary voice-btn hidden" id="edit-voice-btn" onclick="voiceScores('edit')">🎤 Punkte einsprechen</button>
     <div id="edit-match-result" class="result-team-select"></div>
     <div class="rts-outcome" id="edit-match-outcome"></div>
     <div class="form-actions">
@@ -910,15 +918,43 @@ async function submitLogin(ev){
 async function loadSeasons(){
   try{
     S.seasons=await StorageService.getSeasons();
-    S.activeSeason=S.seasons.find(s=>s.is_active)||S.seasons[0]||null;
+    // Auf diesem Gerät festgehaltene Saison hat Vorrang vor der aktiven Saison der Datenbank
+    const locked=lockedSeasonId();
+    const lockedSeason=locked&&S.seasons.find(s=>s.id===locked);
+    if(locked&&!lockedSeason)setLockedSeasonId(null);   // Saison gibt es nicht mehr
+    S.activeSeason=lockedSeason||S.seasons.find(s=>s.is_active)||S.seasons[0]||null;
     renderSeasonBar();
   }catch(e){
     // Migration evtl. noch nicht ausgeführt
     document.getElementById('season-select').innerHTML='<option>Keine Saison</option>';
   }
 }
+/* ---- Saison auf diesem Gerät festhalten ----
+   Verhindert, dass beim Neuladen wieder die aktive Saison der Datenbank gewählt wird
+   oder die Auswahl versehentlich geändert wird. Ergebnisse landen in der festgehaltenen Saison. */
+const SEASON_LOCK_KEY='pickup_season_lock';
+function lockedSeasonId(){try{return localStorage.getItem(SEASON_LOCK_KEY)||null;}catch(e){return null;}}
+function setLockedSeasonId(id){try{id?localStorage.setItem(SEASON_LOCK_KEY,id):localStorage.removeItem(SEASON_LOCK_KEY);}catch(e){}}
+function toggleSeasonLock(){
+  if(lockedSeasonId()){
+    if(!confirm('Saison nicht mehr festhalten? Danach kann sie wieder gewechselt werden.'))return;
+    setLockedSeasonId(null);
+    renderSeasonBar();
+    showToast('Saison nicht mehr festgehalten','info');
+    return;
+  }
+  if(!S.activeSeason){showToast('Keine Saison ausgewählt','error');return;}
+  setLockedSeasonId(S.activeSeason.id);
+  renderSeasonBar();
+  showToast(`📌 „${S.activeSeason.name}“ auf diesem Gerät festgehalten`,'success');
+}
 function renderSeasonBar(){
   const sel=document.getElementById('season-select');
+  const lockBtn=document.getElementById('season-lock-btn');
+  const isLocked=!!lockedSeasonId()&&!!S.activeSeason;
+  sel.disabled=isLocked;
+  lockBtn.classList.toggle('on',isLocked);
+  lockBtn.title=isLocked?'Saison festgehalten – tippen zum Lösen':'Saison auf diesem Gerät festhalten';
   const kindEl=document.getElementById('season-kind');
   if(!S.seasons.length){
     sel.innerHTML='<option value="">Keine Saison angelegt</option>';
@@ -1640,6 +1676,70 @@ function toggleLockTeams(){
 }
 
 /* ================================================================
+   SPRACHEINGABE FÜR ERGEBNISSE (Web Speech API)
+   Erkannte Punkte werden nur eingetragen, gespeichert wird erst nach Tipp auf
+   „Speichern“. Die Erkennung erledigt der Browser: Chrome/Edge schicken die
+   Aufnahme an Google/Microsoft, Safari an Apple → einmalige Bestätigung.
+   ================================================================ */
+const SpeechRec=window.SpeechRecognition||window.webkitSpeechRecognition||null;
+const VOICE_OK_KEY='pickup_voice_ok';
+const NUM_WORDS={null:0,zero:0,eins:1,ein:1,eine:1,zwei:2,zwo:2,drei:3,vier:4,'fünf':5,fuenf:5,sechs:6,sieben:7,acht:8,neun:9,zehn:10,elf:11,'zwölf':12,zwoelf:12,
+  dreizehn:13,vierzehn:14,'fünfzehn':15,sechzehn:16,siebzehn:17,achtzehn:18,neunzehn:19,zwanzig:20,einundzwanzig:21};
+/* Gesprochenen Text in Punkte je Team übersetzen.
+   Versteht z. B. „11 zu 7“, „elf zu sieben“, „Team B 11 Team A 7“, „Unentschieden 9“. */
+function parseSpokenScores(text,teamCount){
+  let t=' '+String(text||'').toLowerCase().replace(/[:\-–,.]/g,' ')+' ';
+  t=t.replace(/[a-zäöüß]+/g,w=>w in NUM_WORDS?String(NUM_WORDS[w]):w);
+  // „Team A 11 …“ – Zuordnung über den Buchstaben
+  const named={}; let m; const re=/team\s*([a-d])\D*?(\d{1,2})/g;
+  while((m=re.exec(t)))named['abcd'.indexOf(m[1])]=+m[2];
+  if(Object.keys(named).length===teamCount&&Object.keys(named).every(k=>+k<teamCount))
+    return Array.from({length:teamCount},(_,i)=>named[i]);
+  const nums=(t.replace(/team\s*[a-d]/g,' ').match(/\b\d{1,2}\b/g)||[]).map(Number);
+  if(/unentschieden/.test(t)&&nums.length===1)return new Array(teamCount).fill(nums[0]);
+  if(nums.length===teamCount)return nums;
+  return null;
+}
+let _rec=null;
+function voiceScores(target){
+  if(!SpeechRec){showToast('Spracheingabe wird von diesem Browser nicht unterstützt','error');return;}
+  if(_rec){_rec.stop();return;}   // zweiter Tipp beendet die Aufnahme
+  let ok=false; try{ok=localStorage.getItem(VOICE_OK_KEY)==='1';}catch(e){}
+  if(!ok){
+    if(!confirm('Spracheingabe: Dein Browser wandelt die Aufnahme in Text um. Chrome und Edge schicken sie dafür an Google bzw. Microsoft, Safari an Apple. Gesprochen wird nur das Ergebnis, z. B. „elf zu sieben“. Einverstanden?'))return;
+    try{localStorage.setItem(VOICE_OK_KEY,'1');}catch(e){}
+  }
+  const teamCount=target==='edit'?(S.editMatch?.teams.length||0):(S.lastResult?.teams.length||0);
+  if(!teamCount)return;
+  const btn=document.getElementById(target==='edit'?'edit-voice-btn':'result-voice-btn');
+  const label=btn.textContent;
+  const rec=new SpeechRec();
+  rec.lang='de-DE'; rec.interimResults=false; rec.maxAlternatives=5;
+  _rec=rec;
+  btn.classList.add('listening'); btn.textContent='🎙️ Ich höre zu … (tippen zum Beenden)';
+  rec.onresult=ev=>{
+    const alts=[...ev.results[0]].map(a=>a.transcript);
+    let pts=null, heard=alts[0]||'';
+    for(const a of alts){pts=parseSpokenScores(a,teamCount); if(pts){heard=a;break;}}
+    if(!pts){showToast(`Nicht verstanden: „${heard}“ – z. B. „elf zu sieben“ sagen`,'error');return;}
+    const sel=target==='edit'?'#edit-match-result input':'#result-team-select input';
+    document.querySelectorAll(sel).forEach((inp,i)=>{
+      inp.value=pts[i];
+      if(target==='edit')setEditScore(i,String(pts[i])); else setResultScore(i,String(pts[i]));
+    });
+    showToast(`Erkannt: ${pts.map((p,i)=>TEAM_NAMES[i]+' '+p).join(', ')} – bitte prüfen und speichern`,'success');
+  };
+  rec.onerror=ev=>{
+    const msg=ev.error==='not-allowed'||ev.error==='service-not-allowed'?'Mikrofon nicht erlaubt – bitte in den Browser-Einstellungen freigeben'
+      :ev.error==='no-speech'?'Nichts gehört – bitte noch einmal versuchen'
+      :'Spracheingabe fehlgeschlagen – bitte Punkte eintippen';
+    showToast(msg,'error');
+  };
+  rec.onend=()=>{_rec=null; btn.classList.remove('listening'); btn.textContent=label;};
+  try{rec.start();}catch(e){_rec=null; btn.classList.remove('listening'); btn.textContent=label; showToast('Spracheingabe konnte nicht starten','error');}
+}
+
+/* ================================================================
    ERGEBNIS ERFASSEN
    ================================================================ */
 // Leere oder ungültige Eingaben → null, sonst ganze Zahl ≥ 0
@@ -1689,6 +1789,9 @@ function openResultForm(){
         oninput="setResultScore(${i},this.value)">
     </div>`).join('');
   paintOutcome('#result-team-select .rts-card','result-outcome',S.matchResultForm.scores);
+  document.getElementById('result-season-hint').textContent=
+    S.activeSeason?`Wird gespeichert in: ${S.activeSeason.name}${lockedSeasonId()?' 📌':''}`:'Wird ohne Saison gespeichert';
+  document.getElementById('result-voice-btn').classList.toggle('hidden',!SpeechRec);
   document.getElementById('result-overlay').classList.add('open');
 }
 function closeResultForm(){document.getElementById('result-overlay').classList.remove('open');}
@@ -1940,6 +2043,7 @@ function renderEditMatch(){
     </div>`;
   }).join('');
   paintOutcome('#edit-match-result .rts-card','edit-match-outcome',e.teams.map(t=>t.score??null));
+  document.getElementById('edit-voice-btn').classList.toggle('hidden',!SpeechRec);
 }
 
 function editPickPlayer(ti,pi){
