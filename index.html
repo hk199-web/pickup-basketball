@@ -209,6 +209,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .rts-card{padding:12px;border-radius:var(--radius-sm);border:2px solid var(--border);background:var(--bg3);cursor:pointer;transition:border-color var(--t),background var(--t)}
 .rts-card.winner{border-color:var(--green);background:rgba(34,197,94,.1)}
 .rts-card.loser{opacity:.45}
+.rts-card.draw{border-color:var(--accent);background:rgba(247,127,0,.1)}
+.btn-lock.on{border-color:rgba(34,197,94,.5)!important;background:rgba(34,197,94,.1)!important;color:var(--green)!important}
 .rts-card.static{cursor:default}
 .rts-outcome{font-size:.8rem;color:var(--text2);margin:-4px 0 14px;min-height:1.2em}
 .rts-header{display:flex;align-items:center;gap:8px;margin-bottom:6px}
@@ -457,9 +459,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
         </svg>
         <span>Revanche – gleiche Teams</span>
       </button>
+      <button class="btn-secondary btn-lock" id="btn-lock" onclick="toggleLockTeams()">📌 Teams festlegen</button>
       <button class="btn-secondary" onclick="reroll()">🔀 Neu würfeln</button>
       <button class="btn-secondary" id="btn-record" onclick="openResultForm()">📝 Ergebnis</button>
-      <button class="btn-secondary" onclick="openSubForm()">🔄 Wechseln</button>
+      <button class="btn-secondary" onclick="openSubForm()">🔄 Spieler wechseln</button>
       <button class="btn-secondary" onclick="showTab('builder')">⚙️ Einstellungen</button>
     </div>
     <div style="padding:14px 16px 0">
@@ -515,7 +518,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 <div class="overlay" id="result-overlay" onclick="if(event.target===this)closeResultForm()">
   <div class="sheet">
     <div class="sheet-title">Ergebnis erfassen</div>
-    <p style="font-size:.85rem;color:var(--text2);margin-bottom:14px">Punkte eintragen – das Team mit den meisten Punkten gewinnt:</p>
+    <p style="font-size:.85rem;color:var(--text2);margin-bottom:14px">Punkte eintragen – das Team mit den meisten Punkten gewinnt, bei Gleichstand ist es unentschieden:</p>
     <div class="result-team-select" id="result-team-select"></div>
     <div class="rts-outcome" id="result-outcome"></div>
     <div class="form-actions">
@@ -1456,6 +1459,8 @@ function buildRandom(pool,t,m){
 }
 
 function generateTeams(){
+  // Festgelegte Teams nie ohne Rückfrage ersetzen
+  if(S.lastResult?.locked&&!confirm('Die festgelegten Teams werden aufgelöst und durch neue ersetzt. Fortfahren?'))return;
   const active=S.players.filter(p=>p.active);
   const m=S.gameMode, t=S.teamCount;
 
@@ -1511,7 +1516,11 @@ function renderResults(){
            : r.assignMode==='manual' ? 'Manuell'
            : r.balanceMethod==='snake' ? 'Snake-Draft' : 'Skill-Summe';
   label.textContent=`${r.teamCount}×${r.gameMode}er · ${ml}`;
-  roundBadge.textContent=`🏀 Runde ${S.roundNumber}`;
+  roundBadge.textContent=`🏀 Runde ${S.roundNumber}`+(r.locked?' · 📌 festgelegt':'');
+  const lockBtn=document.getElementById('btn-lock');
+  lockBtn.classList.toggle('on',!!r.locked);
+  lockBtn.textContent=r.locked?'📌 Festgelegt – lösen':'📌 Teams festlegen';
+  saveLockedTeams();
   roundBadge.classList.remove('hidden');
   acts.classList.remove('hidden');
 
@@ -1576,6 +1585,48 @@ function renderResults(){
 }
 
 /* ================================================================
+   TEAMS FESTLEGEN – Schutz auf diesem Gerät
+   Festgelegte Teams bleiben nach Neuladen/App-Schließen erhalten und werden
+   nur nach Rückfrage durch neue ersetzt. Wechseln bleibt jederzeit möglich.
+   Gespeichert wird ohne echte Namen (nur Spitzname, Position, Ratings).
+   ================================================================ */
+const LOCK_KEY='pickup_teams_v1';
+function slimPlayer(p){return {id:p.id,nickname:p.nickname,position:p.position,ratings:p.ratings};}
+function saveLockedTeams(){
+  const r=S.lastResult;
+  try{
+    if(!r||!r.locked){localStorage.removeItem(LOCK_KEY);return;}
+    localStorage.setItem(LOCK_KEY,JSON.stringify({
+      v:1, roundNumber:S.roundNumber, lastLoserIndex:S.lastLoserIndex,
+      r:{...r, teams:r.teams.map(t=>({...t,players:t.players.map(slimPlayer)})), bench:r.bench.map(slimPlayer)},
+    }));
+  }catch(e){}
+}
+function restoreLockedTeams(){
+  let d=null;
+  try{d=JSON.parse(localStorage.getItem(LOCK_KEY)||'null');}catch(e){d=null;}
+  if(!d||d.v!==1||!d.r||!Array.isArray(d.r.teams))return;
+  // Aktuelle Spielerdaten verwenden, falls der Spieler noch existiert
+  const fresh=p=>S.players.find(x=>x.id===p.id)||p;
+  S.lastResult={...d.r, locked:true,
+    teams:d.r.teams.map(t=>({...t,players:(t.players||[]).map(fresh)})),
+    bench:(d.r.bench||[]).map(fresh)};
+  S.roundNumber=d.roundNumber||1;
+  S.lastLoserIndex=Number.isInteger(d.lastLoserIndex)?d.lastLoserIndex:null;
+  renderResults();
+  showToast('📌 Festgelegte Teams wiederhergestellt – siehe Reiter Ergebnis','info');
+}
+function toggleLockTeams(){
+  const r=S.lastResult; if(!r){showToast('Noch keine Teams vorhanden','error');return;}
+  if(r.locked){
+    if(!confirm('Festlegung lösen? Die Teams bleiben stehen, sind aber nicht mehr vor „Neu würfeln“ geschützt.'))return;
+    r.locked=false; renderResults(); showToast('Festlegung gelöst','info');
+  }else{
+    r.locked=true; renderResults(); showToast('📌 Teams festgelegt – bleiben auch nach Neuladen erhalten','success');
+  }
+}
+
+/* ================================================================
    ERGEBNIS ERFASSEN
    ================================================================ */
 // Leere oder ungültige Eingaben → null, sonst ganze Zahl ≥ 0
@@ -1585,21 +1636,29 @@ function parseScore(v){
 }
 /* Sieger ergibt sich allein aus den Punkten: die höchste Punktzahl gewinnt.
    Liefert {winner} oder {error} (Punkte fehlen / Gleichstand an der Spitze). */
+/* Höchste Punktzahl gewinnt. Haben mehrere Teams die höchste Punktzahl, sind sie
+   unentschieden ("draw"), alle anderen verlieren – dieselbe Regel gilt in der Datenbank. */
 function scoreOutcome(pts){
   if(pts.some(p=>p===null))return {error:'Bitte für jedes Team die Punkte eintragen'};
   const max=Math.max(...pts);
-  if(pts.filter(p=>p===max).length>1)return {error:'Gleichstand – es braucht einen Sieger mit den meisten Punkten'};
-  return {winner:pts.indexOf(max)};
+  const top=pts.filter(p=>p===max).length;
+  const results=pts.map(p=>p<max?'loss':top>1?'draw':'win');
+  return {results, winner:top===1?pts.indexOf(max):undefined, draw:top>1};
 }
 /* Karten grün/blass färben und Hinweis anzeigen, ohne neu zu rendern (Fokus bleibt im Feld) */
 function paintOutcome(cardSel,outcomeId,pts){
   const o=scoreOutcome(pts);
   document.querySelectorAll(cardSel).forEach((c,i)=>{
-    c.classList.toggle('winner',o.winner===i);
-    c.classList.toggle('loser',o.winner!==undefined&&o.winner!==i);
+    const res=o.results?.[i];
+    c.classList.toggle('winner',res==='win');
+    c.classList.toggle('draw',res==='draw');
+    c.classList.toggle('loser',res==='loss');
   });
+  const drawNames=o.results?o.results.map((r,i)=>r==='draw'?TEAM_NAMES[i]:null).filter(Boolean):[];
   document.getElementById(outcomeId).textContent=
-    o.winner!==undefined?`🏆 Sieger: ${TEAM_NAMES[o.winner]}`:(pts.every(p=>p===null)?'':o.error);
+    o.winner!==undefined?`🏆 Sieger: ${TEAM_NAMES[o.winner]}`
+    :o.draw?`🤝 Unentschieden: ${drawNames.join(' und ')}`
+    :(pts.every(p=>p===null)?'':o.error);
   return o;
 }
 
@@ -1632,7 +1691,7 @@ async function saveMatchResult(){
   const teams=r.teams.map((team,i)=>({
     players:team.players,
     score:pts[i],
-    result:i===o.winner?'win':'loss',
+    result:o.results[i],
   }));
   const btn=document.getElementById('save-result-btn'); btn.disabled=true;
   try{
@@ -1642,7 +1701,7 @@ async function saveMatchResult(){
     // Verlierer-Team merken für die Schnellrotation
     S.lastLoserIndex = teams.findIndex(t=>t.result==='loss');
     closeResultForm(); renderResults();
-    showToast('Ergebnis gespeichert 🏆 — jetzt wechseln für die nächste Runde','success');
+    showToast(o.draw?'Unentschieden gespeichert 🤝':'Ergebnis gespeichert 🏆 — jetzt wechseln für die nächste Runde','success');
   }catch(e){showToast(userMsg(e),'error');}
   finally{btn.disabled=false;}
 }
@@ -1940,7 +1999,7 @@ async function saveEditMatch(){
       teamId:t.teamId,
       playerIds:t.players.map(p=>p.id),
       score:t.score,
-      result:ti===o.winner?'win':'loss',
+      result:o.results[ti],
     }));
     await StorageService.updateMatch(e.id,payload);
     closeEditMatch();
@@ -2115,6 +2174,7 @@ function scheduleReload(){
   await loadSeasons();
   await renderPlayers();
   refreshBuilder();
+  restoreLockedTeams();
   StorageService.subscribeToPlayers(scheduleReload);
 
   // Handy aus dem Standby / App wieder im Vordergrund: Daten auffrischen,
